@@ -1,0 +1,45 @@
+name: Build LNReader plugins
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: lnreader/lnreader-plugins
+          ref: master
+          path: upstream
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: upstream/package-lock.json
+      - name: Install upstream build tooling
+        working-directory: upstream
+        run: npm ci
+      - name: Copy EatApplePies plugin into upstream tree
+        run: |
+          mkdir -p upstream/plugins/english
+          cp plugins/english/eatapplepies.ts upstream/plugins/english/eatapplepies.ts
+          mkdir -p upstream/public/static/src/en/eatapplepies
+          cp plugins/english/eatapplepies.svg upstream/public/static/src/en/eatapplepies/icon.svg
+      - name: Build plugin manifest
+        working-directory: upstream
+        run: npm run build:compile && npm run build:manifest
+      - name: Publish generated files
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd upstream
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git checkout -B plugins/v3.0.0
+          git add .js .dist public/static/src/en/eatapplepies
+          git commit -m "Build EatApplePies plugin" || exit 0
+          git push https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git HEAD:plugins/v3.0.0 --force
