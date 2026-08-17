@@ -1,0 +1,7 @@
+{
+  "name": "EatApplePies LNReader",
+  "id": "eatapplepies",
+  "site": "https://eatapplepies.com/",
+  "plugin": "src/eatapplepies.js",
+  "version": "1.0.0"
+}
