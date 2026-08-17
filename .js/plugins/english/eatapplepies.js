@@ -8,7 +8,7 @@ class EatApplePies {
     this.name = "EatApplePies";
     this.icon = "src/en/eatapplepies/icon.svg";
     this.site = "https://eatapplepies.com";
-    this.version = "1.0.1";
+    this.version = "1.0.2";
   }
 
   async fetchPage(url) {
@@ -43,43 +43,75 @@ class EatApplePies {
       links = $(selector).toArray();
       if (links.length) break;
     }
+
     links.forEach((element, index) => {
       const href = $(element).attr("href");
       const name = $(element).text().replace(/\s+/g, " ").trim();
       if (!href || !name) return;
       const absolute = href.startsWith("http") ? href : `${this.site}${href.startsWith("/") ? "" : "/"}${href}`;
       if (!absolute.startsWith(this.site) || seen.has(absolute)) return;
-      const match = name.match(/(?:chapter|ch\.?|part\s*\d+\s*chapter)\s*(\d+(?:\.\d+)?)/i);
-      chapters.push({ name, path: absolute.replace(this.site, "") || "/", releaseTime: "", chapterNumber: match ? Number(match[1]) : chapters.length + index + 1 });
+
+      // EAP uses titles such as "Chapter 123", "Chapter 123.5" and
+      // "Part 2 Chapter 410". Capture the chapter number wherever it occurs.
+      const match = name.match(/chapter\s+(\d+(?:\.\d+)?)/i);
+      const chapterNumber = match ? Number(match[1]) : chapters.length + index + 1;
+
+      chapters.push({
+        name,
+        path: absolute.replace(this.site, "") || "/",
+        releaseTime: "",
+        chapterNumber,
+      });
       seen.add(absolute);
     });
+
     return links.length;
   }
 
   async parseNovel(novelPath) {
     const slug = String(novelPath).replace(/^\/+|\/+$/g, "");
     const chapters = [];
-    let pageUrl = `${this.site}/category/${encodeURIComponent(slug)}/?posts_per_page=100`;
-    let pages = 0;
     let novelName = slug;
+    let page = 1;
 
-    while (pageUrl && pages < 250) {
+    // EatApplePies serves category archives in 10-post pages. The archive
+    // pagination isn't consistently marked with a "next" class, so construct
+    // /page/N/ URLs directly. This prevents the parser from stopping after the
+    // first 10 chapters.
+    while (page <= 300) {
+      const pageUrl = page === 1
+        ? `${this.site}/category/${encodeURIComponent(slug)}/`
+        : `${this.site}/category/${encodeURIComponent(slug)}/page/${page}/`;
+
       const $ = await this.fetchPage(pageUrl);
       const heading = $("h1").first().text().replace(/^Category Archives:\s*/i, "").trim();
       if (heading) novelName = heading;
+
+      const before = chapters.length;
       const count = this.parseArchive($, chapters);
-      if (!count) break;
-      const next = $(".nav-links a.next, .pagination a.next, a.next.page-numbers, a.next-posts-link").first().attr("href");
-      pageUrl = next ? (next.startsWith("http") ? next : `${this.site}${next.startsWith("/") ? "" : "/"}${next}`) : null;
-      pages++;
+      if (!count || chapters.length === before) break;
+
+      page += 1;
     }
 
-    chapters.sort((a, b) => a.chapterNumber - b.chapterNumber);
-    return { name: novelName, path: novelPath, cover: defaultCover, summary: `Chapters published under the ${novelName} category on EatApplePies.`, chapters };
+    chapters.sort((a, b) => {
+      if (a.chapterNumber !== b.chapterNumber) return a.chapterNumber - b.chapterNumber;
+      return a.name.localeCompare(b.name);
+    });
+
+    return {
+      name: novelName,
+      path: novelPath,
+      cover: defaultCover,
+      summary: `Chapters published under the ${novelName} category on EatApplePies.`,
+      chapters,
+    };
   }
 
   async parseChapter(chapterPath) {
-    const url = chapterPath.startsWith("http") ? chapterPath : `${this.site}${chapterPath.startsWith("/") ? "" : "/"}${chapterPath}`;
+    const url = chapterPath.startsWith("http")
+      ? chapterPath
+      : `${this.site}${chapterPath.startsWith("/") ? "" : "/"}${chapterPath}`;
     const $ = await this.fetchPage(url);
     const content = $("article .entry-content, article .post-content, .entry-content, .post-content, .single-post-content").first().clone();
     content.find("script, style, noscript, iframe, form, .sharedaddy, .jp-relatedposts, .comments-area").remove();
