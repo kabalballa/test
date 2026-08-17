@@ -7,7 +7,7 @@ class EatApplePies implements Plugin.PluginBase {
   name = 'EatApplePies';
   icon = 'src/en/eatapplepies/icon.svg';
   site = 'https://eatapplepies.com/';
-  version = '1.0.3';
+  version = '1.0.4';
 
   private async wp<T>(endpoint: string): Promise<T> {
     const response = await fetchApi(`${this.site}wp-json/wp/v2/${endpoint}`);
@@ -36,26 +36,28 @@ class EatApplePies implements Plugin.PluginBase {
 
     const chapters: Plugin.ChapterItem[] = [];
 
-    // EAP's WordPress installation can cap API responses at 10 posts even
-    // when per_page=100 is requested. Therefore a 10-item response is NOT
-    // the end; continue until WordPress returns an actually empty page.
+    // EAP caps the posts endpoint at 10 results. Explicitly request every
+    // API page instead of relying on per_page=100 or a short-page heuristic.
     for (let page = 1; page <= 250; page++) {
       let posts: WpPost[];
       try {
-        posts = await this.wp<WpPost[]>(`posts?categories=${category.id}&per_page=100&page=${page}&orderby=date&order=asc`);
+        posts = await this.wp<WpPost[]>(`posts?categories=${category.id}&per_page=10&page=${page}&orderby=date&order=asc`);
       } catch {
         break;
       }
       if (!posts.length) break;
 
-      posts.forEach(post => {
+      for (const post of posts) {
+        if (chapters.some(chapter => chapter.path === post.slug)) continue;
         chapters.push({
           name: decodeHtml(post.title.rendered),
           path: post.slug,
           releaseTime: post.date,
           chapterNumber: extractChapterNumber(post.title.rendered) ?? chapters.length + 1,
         });
-      });
+      }
+
+      if (posts.length < 10) break;
     }
 
     chapters.sort((a, b) => (a.chapterNumber ?? 0) - (b.chapterNumber ?? 0));
