@@ -1,1 +1,163 @@
-var e=this&&this.__awaiter||function(e,t,r,n){return new(r||(r=Promise))((function(o,a){function i(e){try{u(n.next(e))}catch(e){a(e)}}function c(e){try{u(n.throw(e))}catch(e){a(e)}}function u(e){var t;e.done?o(e.value):(t=e.value,t instanceof r?t:new r((function(e){e(t)}))).then(i,c)}u((n=n.apply(e,t||[])).next())}))},t=this&&this.__generator||function(e,t){var r,n,o,a={label:0,sent:function(){if(1&o[0])throw o[1];return o[1]},trys:[],ops:[]},i=Object.create(("function"==typeof Iterator?Iterator:Object).prototype);return i.next=c(0),i.throw=c(1),i.return=c(2),"function"==typeof Symbol&&(i[Symbol.iterator]=function(){return this}),i;function c(c){return function(u){return function(c){if(r)throw new TypeError("Generator is already executing.");for(;i&&(i=0,c[0]&&(a=0)),a;)try{if(r=1,n&&(o=2&c[0]?n.return:c[0]?n.throw||((o=n.return)&&o.call(n),0):n.next)&&!(o=o.call(n,c[1])).done)return o;switch(n=0,o&&(c=[2&c[0],o.value]),c[0]){case 0:case 1:o=c;break;case 4:return a.label++,{value:c[1],done:!1};case 5:a.label++,n=c[1],c=[0];continue;case 7:c=a.ops.pop(),a.trys.pop();continue;default:if(!(o=a.trys,(o=o.length>0&&o[o.length-1])||6!==c[0]&&2!==c[0])){a=0;continue}if(3===c[0]&&(!o||c[1]>o[0]&&c[1]<o[3])){a.label=c[1];break}if(6===c[0]&&a.label<o[1]){a.label=o[1],o=c;break}if(o&&a.label<o[2]){a.label=o[2],a.ops.push(c);break}o[2]&&a.ops.pop(),a.trys.pop();continue}c=t.call(e,a)}catch(e){c=[6,e],n=0}finally{r=o=0}if(5&c[0])throw c[1];return{value:c[0]?c[1]:void 0,done:!0}}([c,u])}}};Object.defineProperty(exports,"__esModule",{value:!0});var r=require("@libs/fetch"),n=require("@libs/defaultCover"),o=function(){function o(){var e=this;this.id="eatapplepies",this.name="EatApplePies",this.icon="src/en/eatapplepies/icon.svg",this.site="https://eatapplepies.com/",this.version="1.0.0",this.resolveUrl=function(t){return"".concat(e.site).concat(t.replace(/^\//,""),"/")}}return o.prototype.wp=function(n){return e(this,void 0,void 0,(function(){return t(this,(function(e){switch(e.label){case 0:return[4,(0,r.fetchApi)("".concat(this.site,"wp-json/wp/v2/").concat(n))];case 1:return[2,e.sent().json()]}}))}))},o.prototype.popularNovels=function(r){return e(this,void 0,void 0,(function(){return t(this,(function(e){switch(e.label){case 0:return r<1||r>2?[2,[]]:[4,this.wp("categories?per_page=100&page=".concat(r,"&hide_empty=true&orderby=count&order=desc"))];case 1:return[2,e.sent().filter((function(e){return"uncategorized"!==e.slug})).filter((function(e){return e.count>0})).map((function(e){return{name:e.name,path:e.slug,cover:n.defaultCover}}))]}}))}))},o.prototype.searchNovels=function(r,o){return e(this,void 0,void 0,(function(){return t(this,(function(e){switch(e.label){case 0:return!r.trim()||o<1?[2,[]]:[4,this.wp("categories?search=".concat(encodeURIComponent(r),"&per_page=100&page=").concat(o,"&hide_empty=true"))];case 1:return[2,e.sent().filter((function(e){return"uncategorized"!==e.slug})).map((function(e){return{name:e.name,path:e.slug,cover:n.defaultCover}}))]}}))}))},o.prototype.parseNovel=function(r){return e(this,void 0,void 0,(function(){var e,o,a,i,c;return t(this,(function(t){switch(t.label){case 0:return[4,this.wp("categories?slug=".concat(encodeURIComponent(r)))];case 1:if(e=t.sent(),!(o=e[0]))return[2,{name:r,path:r,cover:n.defaultCover,chapters:[]}];a=[],i=1,t.label=2;case 2:return i<=50?[4,this.wp("posts?categories=".concat(o.id,"&per_page=100&page=").concat(i,"&orderby=date&order=asc&_embed"))]:[3,5];case 3:if(!(c=t.sent()).length)return[3,5];if(a.push.apply(a,c.map((function(e,t){var r,n,o;return{name:e.title.rendered.replace(/&#8217;|&#8216;/g,"'").replace(/&#8220;|&#8221;/g,'"'),path:e.slug,releaseTime:e.date,chapterNumber:null!==(n=e.title.rendered,o=n.match(/(?:chapter|ch\.?|part\s*2\s*chapter)\s*(\d+)/i),r=o?Number(o[1]):void 0)&&void 0!==r?r:a.length+t+1}}))),c.length<100)return[3,5];t.label=4;case 4:return i++,[3,2];case 5:return[2,{name:o.name,path:o.slug,cover:n.defaultCover,summary:o.description?(u=o.description,u.replace(/<[^>]*>/g," ").replace(/\s+/g," ").trim()):"Chapters published under the ".concat(o.name," category on EatApplePies."),chapters:a}]}var u}))}))},o.prototype.parseChapter=function(r){return e(this,void 0,void 0,(function(){var e,n,o;return t(this,(function(t){switch(t.label){case 0:return[4,this.wp("posts?slug=".concat(encodeURIComponent(r),"&per_page=10"))];case 1:return e=t.sent(),n=e[0],[2,(null===(o=null==n?void 0:n.content)||void 0===o?void 0:o.rendered)||"<p>Chapter content could not be found.</p>"]}}))}))},o}();exports.default=new o;
+const cheerio = require("cheerio");
+const { fetchApi } = require("@libs/fetch");
+const { defaultCover } = require("@libs/defaultCover");
+
+class EatApplePies {
+  constructor() {
+    this.id = "eatapplepies";
+    this.name = "EatApplePies";
+    this.icon = "src/en/eatapplepies/icon.svg";
+    this.site = "https://eatapplepies.com";
+    this.version = "1.0.0";
+  }
+
+  async fetchPage(url) {
+    const response = await fetchApi(url);
+    if (!response.ok) {
+      throw new Error(`EatApplePies returned ${response.status}`);
+    }
+    return cheerio.load(await response.text());
+  }
+
+  async wp(path) {
+    const response = await fetchApi(`${this.site}/wp-json/wp/v2/${path}`);
+    if (!response.ok) throw new Error(`WordPress API returned ${response.status}`);
+    return response.json();
+  }
+
+  async popularNovels(pageNo) {
+    if (pageNo < 1 || pageNo > 2) return [];
+    const categories = await this.wp(
+      `categories?per_page=100&page=${pageNo}&hide_empty=true&orderby=count&order=desc`,
+    );
+    return categories
+      .filter((category) => category.slug !== "uncategorized" && category.count > 0)
+      .map((category) => ({
+        name: category.name,
+        path: category.slug,
+        cover: defaultCover,
+      }));
+  }
+
+  async searchNovels(searchTerm, pageNo) {
+    if (!searchTerm.trim() || pageNo < 1) return [];
+    const categories = await this.wp(
+      `categories?search=${encodeURIComponent(searchTerm)}&per_page=100&page=${pageNo}&hide_empty=true`,
+    );
+    return categories
+      .filter((category) => category.slug !== "uncategorized")
+      .map((category) => ({
+        name: category.name,
+        path: category.slug,
+        cover: defaultCover,
+      }));
+  }
+
+  parseArchive($, chapters) {
+    const seen = new Set(chapters.map((chapter) => chapter.path));
+    const selectors = [
+      "article .entry-title a",
+      "article h2.entry-title a",
+      "article h3.entry-title a",
+      ".post .entry-title a",
+      ".post-title a",
+    ];
+
+    let links = [];
+    for (const selector of selectors) {
+      links = $(selector).toArray();
+      if (links.length) break;
+    }
+
+    links.forEach((element, index) => {
+      const href = $(element).attr("href");
+      const name = $(element).text().replace(/\\s+/g, " ").trim();
+      if (!href || !name) return;
+
+      const absolute = href.startsWith("http") ? href : `${this.site}${href.startsWith("/") ? "" : "/"}${href}`;
+      if (!absolute.startsWith(this.site)) return;
+      if (seen.has(absolute)) return;
+
+      const match = name.match(/(?:chapter|ch\\.?|part\\s*\\d+\\s*chapter)\\s*(\\d+(?:\\.\\d+)?)/i);
+      chapters.push({
+        name,
+        path: absolute.replace(this.site, "") || "/",
+        releaseTime: "",
+        chapterNumber: match ? Number(match[1]) : chapters.length + index + 1,
+      });
+      seen.add(absolute);
+    });
+
+    return links.length;
+  }
+
+  async parseNovel(novelPath) {
+    const slug = String(novelPath).replace(/^\\/+|\\/+$/g, "");
+    const firstUrl = `${this.site}/category/${encodeURIComponent(slug)}/?posts_per_page=100`;
+    const chapters = [];
+    let pageUrl = firstUrl;
+    let pages = 0;
+    let novelName = slug;
+
+    while (pageUrl && pages < 250) {
+      const $ = await this.fetchPage(pageUrl);
+      if ($("h1").first().text().trim()) {
+        novelName = $("h1").first().text().replace(/^Category Archives:\s*/i, "").trim() || novelName;
+      }
+
+      const count = this.parseArchive($, chapters);
+      if (!count) break;
+
+      const next = $(
+        ".nav-links a.next, .pagination a.next, a.next.page-numbers, a.next-posts-link",
+      )
+        .first()
+        .attr("href");
+
+      pageUrl = next
+        ? next.startsWith("http")
+          ? next
+          : `${this.site}${next.startsWith("/") ? "" : "/"}${next}`
+        : null;
+      pages += 1;
+    }
+
+    chapters.sort((a, b) => {
+      const an = Number.isFinite(a.chapterNumber) ? a.chapterNumber : 0;
+      const bn = Number.isFinite(b.chapterNumber) ? b.chapterNumber : 0;
+      return an - bn;
+    });
+
+    return {
+      name: novelName,
+      path: novelPath,
+      cover: defaultCover,
+      summary: `Chapters published under the ${novelName} category on EatApplePies.`,
+      chapters,
+    };
+  }
+
+  async parseChapter(chapterPath) {
+    const url = chapterPath.startsWith("http")
+      ? chapterPath
+      : `${this.site}${chapterPath.startsWith("/") ? "" : "/"}${chapterPath}`;
+    const $ = await this.fetchPage(url);
+
+    const content = $(
+      "article .entry-content, article .post-content, .entry-content, .post-content, .single-post-content",
+    )
+      .first()
+      .clone();
+
+    content.find("script, style, noscript, iframe, form, .sharedaddy, .jp-relatedposts, .comments-area").remove();
+    return content.html() || "<p>Chapter content could not be found.</p>";
+  }
+
+  resolveUrl(path) {
+    return path.startsWith("http")
+      ? path
+      : `${this.site}${path.startsWith("/") ? "" : "/"}${path}`;
+  }
+}
+
+module.exports.default = new EatApplePies();
