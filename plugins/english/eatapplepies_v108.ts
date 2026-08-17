@@ -7,7 +7,7 @@ class EatApplePies implements Plugin.PluginBase {
   name = 'EatApplePies';
   icon = 'src/en/eatapplepies/icon.svg';
   site = 'https://eatapplepies.com/';
-  version = '1.0.9';
+  version = '1.0.10';
 
   private async wp<T>(endpoint: string): Promise<T> {
     const response = await fetchApi(`${this.site}wp-json/wp/v2/${endpoint}`);
@@ -18,17 +18,13 @@ class EatApplePies implements Plugin.PluginBase {
   async popularNovels(pageNo: number): Promise<Plugin.NovelItem[]> {
     if (pageNo < 1 || pageNo > 10) return [];
     const categories = await this.wp<WpCategory[]>(`categories?per_page=100&page=${pageNo}&hide_empty=true&orderby=name&order=asc`);
-    return categories
-      .filter(c => c.slug !== 'uncategorized' && c.count > 0)
-      .map(c => ({ name: c.name, path: c.slug, cover: defaultCover }));
+    return categories.filter(c => c.slug !== 'uncategorized' && c.count > 0).map(c => ({ name: c.name, path: c.slug, cover: defaultCover }));
   }
 
   async searchNovels(searchTerm: string, pageNo: number): Promise<Plugin.NovelItem[]> {
     if (!searchTerm.trim() || pageNo < 1) return [];
     const categories = await this.wp<WpCategory[]>(`categories?search=${encodeURIComponent(searchTerm)}&per_page=100&page=${pageNo}&hide_empty=true`);
-    return categories
-      .filter(c => c.slug !== 'uncategorized' && c.count > 0)
-      .map(c => ({ name: c.name, path: c.slug, cover: defaultCover }));
+    return categories.filter(c => c.slug !== 'uncategorized' && c.count > 0).map(c => ({ name: c.name, path: c.slug, cover: defaultCover }));
   }
 
   async parseNovel(novelPath: string): Promise<Plugin.SourceNovel> {
@@ -36,11 +32,12 @@ class EatApplePies implements Plugin.PluginBase {
     const category = categories[0];
     if (!category) return { name: novelPath, path: novelPath, cover: defaultCover, chapters: [] };
 
-    const chapters: Plugin.ChapterItem[] = [];
+    const chapters: ChapterWithIndex[] = [];
+    let discoveryIndex = 0;
     for (let page = 1; page <= 250; page++) {
       let posts: WpPost[];
       try {
-        posts = await this.wp<WpPost[]>(`posts?categories=${category.id}&per_page=10&page=${page}&orderby=date&order=asc`);
+        posts = await this.wp<WpPost[]>(`posts?categories=${category.id}&per_page=100&page=${page}&orderby=date&order=asc`);
       } catch {
         break;
       }
@@ -48,19 +45,31 @@ class EatApplePies implements Plugin.PluginBase {
       for (const post of posts) {
         if (chapters.some(c => c.path === post.slug)) continue;
         const title = decodeHtml(post.title.rendered);
-        chapters.push({ name: title, path: post.slug, releaseTime: post.date, chapterNumber: extractChapterNumber(title) });
+        chapters.push({ name: title, path: post.slug, releaseTime: post.date, chapterNumber: extractChapterNumber(title), discoveryIndex: discoveryIndex++ });
       }
-      if (posts.length < 10) break;
+      if (posts.length < 100) break;
     }
 
+    // Primary: exact WordPress publication timestamp.
+    // Secondary: chapter number only when timestamps are identical.
+    // Final fallback: original API order. Title punctuation never participates in sorting.
     chapters.sort((a, b) => {
       const ad = a.releaseTime ? Date.parse(a.releaseTime) : Number.MAX_SAFE_INTEGER;
       const bd = b.releaseTime ? Date.parse(b.releaseTime) : Number.MAX_SAFE_INTEGER;
       if (ad !== bd) return ad - bd;
-      return (a.chapterNumber ?? Number.MAX_SAFE_INTEGER) - (b.chapterNumber ?? Number.MAX_SAFE_INTEGER);
+      const ac = a.chapterNumber ?? Number.MAX_SAFE_INTEGER;
+      const bc = b.chapterNumber ?? Number.MAX_SAFE_INTEGER;
+      if (ac !== bc) return ac - bc;
+      return a.discoveryIndex - b.discoveryIndex;
     });
 
-    return { name: category.name, path: category.slug, cover: defaultCover, summary: category.description ? stripHtml(category.description) : `Chapters published under ${category.name}.`, chapters };
+    return {
+      name: category.name,
+      path: category.slug,
+      cover: defaultCover,
+      summary: category.description ? stripHtml(category.description) : `Chapters published under ${category.name}.`,
+      chapters: chapters.map(({ discoveryIndex, ...chapter }) => chapter),
+    };
   }
 
   async parseChapter(chapterPath: string): Promise<string> {
@@ -83,5 +92,6 @@ function extractChapterNumber(title: string): number | undefined {
 
 type WpCategory = { id: number; name: string; slug: string; description: string; count: number };
 type WpPost = { slug: string; date: string; title: { rendered: string }; content: { rendered: string } };
+type ChapterWithIndex = Plugin.ChapterItem & { discoveryIndex: number };
 
 export default new EatApplePies();
