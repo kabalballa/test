@@ -7,7 +7,7 @@ class EatApplePies implements Plugin.PluginBase {
   name = 'EatApplePies';
   icon = 'src/en/eatapplepies/icon.svg';
   site = 'https://eatapplepies.com/';
-  version = '1.0.0';
+  version = '1.0.2';
 
   private async wp<T>(endpoint: string): Promise<T> {
     const response = await fetchApi(`${this.site}wp-json/wp/v2/${endpoint}`);
