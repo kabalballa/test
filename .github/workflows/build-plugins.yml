@@ -49,10 +49,10 @@ jobs:
       - name: Fix EatApplePies URLs
         working-directory: upstream
         run: |
-          sed -i 's#https://raw.githubusercontent.com/lnreader/lnreader-plugins/master/.js/src/plugins/english/eatapplepies.js#https://raw.githubusercontent.com/kabalballa/test/plugins/v3.0.0/.js/src/plugins/english/eatapplepies.js#g' .dist/plugins.json
+          sed -i 's#https://raw.githubusercontent.com/lnreader/lnreader-plugins/master/.js/src/plugins/english/eatapplepies.js#https://raw.githubusercontent.com/kabalballa/test/plugins/v3.0.0/.js/plugins/english/eatapplepies.js#g' .dist/plugins.json
           sed -i 's#https://raw.githubusercontent.com/lnreader/lnreader-plugins/master/public/static/src/en/eatapplepies/icon.svg#https://raw.githubusercontent.com/kabalballa/test/plugins/v3.0.0/public/static/src/en/eatapplepies/icon.svg#g' .dist/plugins.json
 
-          sed -i 's#https://raw.githubusercontent.com/lnreader/lnreader-plugins/master/.js/src/plugins/english/eatapplepies.js#https://raw.githubusercontent.com/kabalballa/test/plugins/v3.0.0/.js/src/plugins/english/eatapplepies.js#g' .dist/plugins.min.json
+          sed -i 's#https://raw.githubusercontent.com/lnreader/lnreader-plugins/master/.js/src/plugins/english/eatapplepies.js#https://raw.githubusercontent.com/kabalballa/test/plugins/v3.0.0/.js/plugins/english/eatapplepies.js#g' .dist/plugins.min.json
           sed -i 's#https://raw.githubusercontent.com/lnreader/lnreader-plugins/master/public/static/src/en/eatapplepies/icon.svg#https://raw.githubusercontent.com/kabalballa/test/plugins/v3.0.0/public/static/src/en/eatapplepies/icon.svg#g' .dist/plugins.min.json
 
       - name: Publish generated files
