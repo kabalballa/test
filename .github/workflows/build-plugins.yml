@@ -18,6 +18,7 @@ jobs:
           repository: lnreader/lnreader-plugins
           ref: master
           path: upstream
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 22
