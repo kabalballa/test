@@ -7,7 +7,7 @@ class EatApplePies implements Plugin.PluginBase {
   name = 'EatApplePies';
   icon = 'src/en/eatapplepies/icon.svg';
   site = 'https://eatapplepies.com/';
-  version = '1.0.8';
+  version = '1.0.9';
 
   private async wp<T>(endpoint: string): Promise<T> {
     const response = await fetchApi(`${this.site}wp-json/wp/v2/${endpoint}`);
@@ -16,21 +16,25 @@ class EatApplePies implements Plugin.PluginBase {
   }
 
   async popularNovels(pageNo: number): Promise<Plugin.NovelItem[]> {
-    if (pageNo !== 1) return [];
-    return [{ name: "Trash of the Count's Family", path: 'tcf', cover: defaultCover }];
+    if (pageNo < 1 || pageNo > 10) return [];
+    const categories = await this.wp<WpCategory[]>(`categories?per_page=100&page=${pageNo}&hide_empty=true&orderby=name&order=asc`);
+    return categories
+      .filter(c => c.slug !== 'uncategorized' && c.count > 0)
+      .map(c => ({ name: c.name, path: c.slug, cover: defaultCover }));
   }
 
   async searchNovels(searchTerm: string, pageNo: number): Promise<Plugin.NovelItem[]> {
-    if (pageNo !== 1) return [];
-    const q = searchTerm.toLowerCase();
-    const name = "Trash of the Count's Family";
-    return name.toLowerCase().includes(q) ? [{ name, path: 'tcf', cover: defaultCover }] : [];
+    if (!searchTerm.trim() || pageNo < 1) return [];
+    const categories = await this.wp<WpCategory[]>(`categories?search=${encodeURIComponent(searchTerm)}&per_page=100&page=${pageNo}&hide_empty=true`);
+    return categories
+      .filter(c => c.slug !== 'uncategorized' && c.count > 0)
+      .map(c => ({ name: c.name, path: c.slug, cover: defaultCover }));
   }
 
   async parseNovel(novelPath: string): Promise<Plugin.SourceNovel> {
-    const categories = await this.wp<WpCategory[]>(`categories?slug=tcf`);
+    const categories = await this.wp<WpCategory[]>(`categories?slug=${encodeURIComponent(novelPath)}`);
     const category = categories[0];
-    if (!category) return { name: "Trash of the Count's Family", path: novelPath, cover: defaultCover, chapters: [] };
+    if (!category) return { name: novelPath, path: novelPath, cover: defaultCover, chapters: [] };
 
     const chapters: Plugin.ChapterItem[] = [];
     for (let page = 1; page <= 250; page++) {
@@ -56,7 +60,7 @@ class EatApplePies implements Plugin.PluginBase {
       return (a.chapterNumber ?? Number.MAX_SAFE_INTEGER) - (b.chapterNumber ?? Number.MAX_SAFE_INTEGER);
     });
 
-    return { name: "Trash of the Count's Family", path: novelPath, cover: defaultCover, summary: 'Trash of the Count’s Family chapters in EatApplePies upload order.', chapters };
+    return { name: category.name, path: category.slug, cover: defaultCover, summary: category.description ? stripHtml(category.description) : `Chapters published under ${category.name}.`, chapters };
   }
 
   async parseChapter(chapterPath: string): Promise<string> {
@@ -71,6 +75,7 @@ function decodeHtml(value: string): string {
   return value.replace(/&#8217;|&#x2019;/gi, "'").replace(/&#8216;|&#x2018;/gi, "'").replace(/&#8220;|&#x201C;/gi, '"').replace(/&#8221;|&#x201D;/gi, '"').replace(/&#8211;|&#x2013;/gi, '–').replace(/&#8212;|&#x2014;/gi, '—').replace(/&#038;|&amp;/gi, '&');
 }
 
+function stripHtml(value: string): string { return value.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim(); }
 function extractChapterNumber(title: string): number | undefined {
   const match = title.match(/(?:chapter|ch\.?)\s*(\d+(?:\.\d+)?)/i);
   return match ? Number(match[1]) : undefined;
