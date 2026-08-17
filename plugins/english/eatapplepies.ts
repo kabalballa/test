@@ -7,7 +7,7 @@ class EatApplePies implements Plugin.PluginBase {
   name = 'EatApplePies';
   icon = 'src/en/eatapplepies/icon.svg';
   site = 'https://eatapplepies.com/';
-  version = '1.0.6';
+  version = '1.0.7';
 
   private async wp<T>(endpoint: string): Promise<T> {
     const response = await fetchApi(`${this.site}wp-json/wp/v2/${endpoint}`);
@@ -15,29 +15,22 @@ class EatApplePies implements Plugin.PluginBase {
     return response.json() as Promise<T>;
   }
 
-  private novels(): Plugin.NovelItem[] {
-    return [
-      { name: "Trash of the Count's Family", path: 'tcf', cover: defaultCover },
-      { name: "Trash of the Count's Family Part 2", path: 'tcf-part2', cover: defaultCover },
-    ];
-  }
-
   async popularNovels(pageNo: number): Promise<Plugin.NovelItem[]> {
-    if (pageNo === 1) return this.novels();
-    return [];
+    if (pageNo !== 1) return [];
+    return [{ name: "Trash of the Count's Family", path: 'tcf', cover: defaultCover }];
   }
 
   async searchNovels(searchTerm: string, pageNo: number): Promise<Plugin.NovelItem[]> {
     if (pageNo !== 1) return [];
     const q = searchTerm.toLowerCase();
-    return this.novels().filter(n => n.name.toLowerCase().includes(q));
+    const name = "Trash of the Count's Family";
+    return name.toLowerCase().includes(q) ? [{ name, path: 'tcf', cover: defaultCover }] : [];
   }
 
   async parseNovel(novelPath: string): Promise<Plugin.SourceNovel> {
-    const part2 = novelPath === 'tcf-part2';
     const categories = await this.wp<WpCategory[]>(`categories?slug=tcf`);
     const category = categories[0];
-    if (!category) return { name: part2 ? "Trash of the Count's Family Part 2" : "Trash of the Count's Family", path: novelPath, cover: defaultCover, chapters: [] };
+    if (!category) return { name: "Trash of the Count's Family", path: novelPath, cover: defaultCover, chapters: [] };
 
     const chapters: Plugin.ChapterItem[] = [];
     for (let page = 1; page <= 250; page++) {
@@ -50,27 +43,35 @@ class EatApplePies implements Plugin.PluginBase {
       if (!posts.length) break;
 
       for (const post of posts) {
-        const title = decodeHtml(post.title.rendered);
-        const isPart2 = /\bpart\s*2\s*chapter\s*\d+/i.test(title);
-        if (isPart2 !== part2) continue;
         if (chapters.some(c => c.path === post.slug)) continue;
+        const title = decodeHtml(post.title.rendered);
         chapters.push({
           name: title,
           path: post.slug,
+          // EAP's WordPress post date is the upload/publication timestamp.
           releaseTime: post.date,
-          chapterNumber: extractChapterNumber(title) ?? chapters.length + 1,
+          chapterNumber: extractChapterNumber(title),
         });
       }
 
       if (posts.length < 10) break;
     }
 
-    chapters.sort((a, b) => (a.chapterNumber ?? 0) - (b.chapterNumber ?? 0));
+    // The source is intentionally ordered by EAP upload/publication date,
+    // not by chapter number. This preserves the site's actual chronological
+    // posting sequence, including the transition into Part 2.
+    chapters.sort((a, b) => {
+      const ad = a.releaseTime ? Date.parse(a.releaseTime) : Number.MAX_SAFE_INTEGER;
+      const bd = b.releaseTime ? Date.parse(b.releaseTime) : Number.MAX_SAFE_INTEGER;
+      if (ad !== bd) return ad - bd;
+      return (a.chapterNumber ?? Number.MAX_SAFE_INTEGER) - (b.chapterNumber ?? Number.MAX_SAFE_INTEGER);
+    });
+
     return {
-      name: part2 ? "Trash of the Count's Family Part 2" : "Trash of the Count's Family",
+      name: "Trash of the Count's Family",
       path: novelPath,
       cover: defaultCover,
-      summary: part2 ? 'Trash of the Count’s Family Part 2 chapters.' : 'Trash of the Count’s Family chapters 1–627.',
+      summary: 'Trash of the Count’s Family chapters in EatApplePies upload order.',
       chapters,
     };
   }
@@ -88,8 +89,6 @@ function decodeHtml(value: string): string {
 }
 
 function extractChapterNumber(title: string): number | undefined {
-  const part2 = title.match(/part\s*2\s*chapter\s*(\d+)/i);
-  if (part2) return Number(part2[1]);
   const match = title.match(/(?:chapter|ch\.?)\s*(\d+(?:\.\d+)?)/i);
   return match ? Number(match[1]) : undefined;
 }
