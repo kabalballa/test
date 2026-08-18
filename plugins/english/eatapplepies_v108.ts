@@ -5,9 +5,9 @@ import { defaultCover } from '@libs/defaultCover';
 class EatApplePies implements Plugin.PluginBase {
   id = 'eatapplepies';
   name = 'EatApplePies';
-  icon = 'src/en/eatapplepies/icon.svg';
+  icon = 'src/en/eatapplepies/icon.png';
   site = 'https://eatapplepies.com/';
-  version = '1.0.16';
+  version = '1.0.17';
 
   private async wp<T>(endpoint: string): Promise<T> {
     const response = await fetchApi(`${this.site}wp-json/wp/v2/${endpoint}`);
@@ -17,9 +17,16 @@ class EatApplePies implements Plugin.PluginBase {
 
   private async categoryCover(categoryId: number): Promise<string> {
     try {
-      const posts = await this.wp<WpPost[]>(`posts?categories=${categoryId}&per_page=1&orderby=date&order=desc&_embed&_fields=featured_media,_embedded`);
-      const media = posts[0]?._embedded?.['wp:featuredmedia']?.[0];
-      return media?.source_url || defaultCover;
+      const posts = await this.wp<WpPost[]>(`posts?categories=${categoryId}&per_page=1&orderby=date&order=desc&_embed`);
+      const post = posts[0];
+      const media = post?._embedded?.['wp:featuredmedia']?.[0];
+      if (media?.source_url) return media.source_url;
+
+      // Some EAP posts don't expose featured_media through the REST response.
+      // Fall back to the first image embedded in the latest post.
+      const html = post?.content?.rendered || '';
+      const match = html.match(/<img[^>]+src=["']([^"']+)["']/i);
+      return match?.[1] || defaultCover;
     } catch {
       return defaultCover;
     }
@@ -55,7 +62,7 @@ class EatApplePies implements Plugin.PluginBase {
       for (const post of posts) {
         if (seen.has(post.slug)) continue;
         seen.add(post.slug);
-        const title = decodeHtml(post.title.rendered);
+        const title = decodeHtml(post.title?.rendered || '');
         const parsed = parseTitle(title);
         chapters.push({ name: title, path: post.slug, releaseTime: post.date, part: parsed.part, chapterNumber: parsed.chapter, seriesKey: parsed.seriesKey, discoveryIndex: chapters.length });
       }
