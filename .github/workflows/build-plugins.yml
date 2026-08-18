@@ -43,8 +43,7 @@ jobs:
 
           mkdir -p upstream/public/static/src/en/eatapplepies
           test -f plugins/english/eatapplepies.svg
-          # React Native/LNReader handles PNG plugin icons more reliably than SVG.
-          convert plugins/english/eatapplepies.svg -background none -resize 512x512 upstream/public/static/src/en/eatapplepies/icon.png
+          cp plugins/english/eatapplepies.svg upstream/public/static/src/en/eatapplepies/icon.svg
 
       - name: Build plugin manifest
         working-directory: upstream
@@ -57,7 +56,7 @@ jobs:
         run: |
           set -euo pipefail
           EAP_JS_URL='https://raw.githubusercontent.com/kabalballa/test/plugins/v3.0.0/.js/plugins/english/eatapplepies.js'
-          EAP_ICON_URL='https://raw.githubusercontent.com/kabalballa/test/plugins/v3.0.0/public/static/src/en/eatapplepies/icon.png'
+          EAP_ICON_URL='https://raw.githubusercontent.com/kabalballa/test/plugins/v3.0.0/public/static/src/en/eatapplepies/icon.svg'
 
           sed -i "s#https://raw.githubusercontent.com/lnreader/lnreader-plugins/master/.js/src/plugins/english/eatapplepies.js#$EAP_JS_URL#g" .dist/plugins.json
           sed -i "s#https://raw.githubusercontent.com/lnreader/lnreader-plugins/master/public/static/src/en/eatapplepies/icon.svg#$EAP_ICON_URL#g" .dist/plugins.json
