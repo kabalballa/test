@@ -5,9 +5,9 @@ import { defaultCover } from '@libs/defaultCover';
 class EatApplePies implements Plugin.PluginBase {
   id = 'eatapplepies';
   name = 'EatApplePies';
-  icon = 'src/en/eatapplepies/icon.png';
+  icon = 'src/en/eatapplepies/icon.svg';
   site = 'https://eatapplepies.com/';
-  version = '1.0.17';
+  version = '1.0.18';
 
   private async wp<T>(endpoint: string): Promise<T> {
     const response = await fetchApi(`${this.site}wp-json/wp/v2/${endpoint}`);
@@ -21,9 +21,6 @@ class EatApplePies implements Plugin.PluginBase {
       const post = posts[0];
       const media = post?._embedded?.['wp:featuredmedia']?.[0];
       if (media?.source_url) return media.source_url;
-
-      // Some EAP posts don't expose featured_media through the REST response.
-      // Fall back to the first image embedded in the latest post.
       const html = post?.content?.rendered || '';
       const match = html.match(/<img[^>]+src=["']([^"']+)["']/i);
       return match?.[1] || defaultCover;
