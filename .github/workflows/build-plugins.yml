@@ -36,9 +36,6 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p upstream/plugins/english
-
-          # The source file has been version-suffixed (for example,
-          # eatapplepies_v108.ts). Do not depend on a stale fixed filename.
           EAP_SOURCE=$(find plugins/english -maxdepth 1 -type f -name 'eatapplepies*.ts' -print | sort | tail -n 1)
           test -n "$EAP_SOURCE"
           echo "Using EatApplePies source: $EAP_SOURCE"
@@ -46,7 +43,8 @@ jobs:
 
           mkdir -p upstream/public/static/src/en/eatapplepies
           test -f plugins/english/eatapplepies.svg
-          cp plugins/english/eatapplepies.svg upstream/public/static/src/en/eatapplepies/icon.svg
+          # React Native/LNReader handles PNG plugin icons more reliably than SVG.
+          convert plugins/english/eatapplepies.svg -background none -resize 512x512 upstream/public/static/src/en/eatapplepies/icon.png
 
       - name: Build plugin manifest
         working-directory: upstream
@@ -59,7 +57,7 @@ jobs:
         run: |
           set -euo pipefail
           EAP_JS_URL='https://raw.githubusercontent.com/kabalballa/test/plugins/v3.0.0/.js/plugins/english/eatapplepies.js'
-          EAP_ICON_URL='https://raw.githubusercontent.com/kabalballa/test/plugins/v3.0.0/public/static/src/en/eatapplepies/icon.svg'
+          EAP_ICON_URL='https://raw.githubusercontent.com/kabalballa/test/plugins/v3.0.0/public/static/src/en/eatapplepies/icon.png'
 
           sed -i "s#https://raw.githubusercontent.com/lnreader/lnreader-plugins/master/.js/src/plugins/english/eatapplepies.js#$EAP_JS_URL#g" .dist/plugins.json
           sed -i "s#https://raw.githubusercontent.com/lnreader/lnreader-plugins/master/public/static/src/en/eatapplepies/icon.svg#$EAP_ICON_URL#g" .dist/plugins.json
