@@ -7,7 +7,7 @@ class EatApplePies implements Plugin.PluginBase {
   name = 'EatApplePies';
   icon = 'src/en/eatapplepies/icon.svg';
   site = 'https://eatapplepies.com/';
-  version = '1.0.10';
+  version = '1.0.11';
 
   private async wp<T>(endpoint: string): Promise<T> {
     const response = await fetchApi(`${this.site}wp-json/wp/v2/${endpoint}`);
@@ -45,22 +45,22 @@ class EatApplePies implements Plugin.PluginBase {
       for (const post of posts) {
         if (chapters.some(c => c.path === post.slug)) continue;
         const title = decodeHtml(post.title.rendered);
-        chapters.push({ name: title, path: post.slug, releaseTime: post.date, chapterNumber: extractChapterNumber(title), discoveryIndex: discoveryIndex++ });
+        // Keep releaseTime for display/metadata, but deliberately do not provide
+        // chapterNumber: LNReader may use chapterNumber for its own ordering.
+        chapters.push({ name: title, path: post.slug, releaseTime: post.date, discoveryIndex: discoveryIndex++ });
       }
       if (posts.length < 100) break;
     }
 
-    // Primary: exact WordPress publication timestamp.
-    // Secondary: chapter number only when timestamps are identical.
-    // Final fallback: original API order. Title punctuation never participates in sorting.
+    // The array order is authoritative for this source:
+    // 1. exact WordPress publication timestamp
+    // 2. original API order for identical timestamps
+    // Never expose a parsed chapter number, because LNReader can otherwise
+    // reorder mixed TCF/TCF Part 2 chapters by number after this sort.
     chapters.sort((a, b) => {
       const ad = a.releaseTime ? Date.parse(a.releaseTime) : Number.MAX_SAFE_INTEGER;
       const bd = b.releaseTime ? Date.parse(b.releaseTime) : Number.MAX_SAFE_INTEGER;
-      if (ad !== bd) return ad - bd;
-      const ac = a.chapterNumber ?? Number.MAX_SAFE_INTEGER;
-      const bc = b.chapterNumber ?? Number.MAX_SAFE_INTEGER;
-      if (ac !== bc) return ac - bc;
-      return a.discoveryIndex - b.discoveryIndex;
+      return ad !== bd ? ad - bd : a.discoveryIndex - b.discoveryIndex;
     });
 
     return {
@@ -85,10 +85,6 @@ function decodeHtml(value: string): string {
 }
 
 function stripHtml(value: string): string { return value.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim(); }
-function extractChapterNumber(title: string): number | undefined {
-  const match = title.match(/(?:chapter|ch\.?)\s*(\d+(?:\.\d+)?)/i);
-  return match ? Number(match[1]) : undefined;
-}
 
 type WpCategory = { id: number; name: string; slug: string; description: string; count: number };
 type WpPost = { slug: string; date: string; title: { rendered: string }; content: { rendered: string } };
