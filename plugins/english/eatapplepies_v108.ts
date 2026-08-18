@@ -7,7 +7,7 @@ class EatApplePies implements Plugin.PluginBase {
   name = 'EatApplePies';
   icon = 'src/en/eatapplepies/icon.svg';
   site = 'https://eatapplepies.com/';
-  version = '1.0.14';
+  version = '1.0.15';
 
   private async wp<T>(endpoint: string): Promise<T> {
     const response = await fetchApi(`${this.site}wp-json/wp/v2/${endpoint}`);
@@ -44,62 +44,48 @@ class EatApplePies implements Plugin.PluginBase {
         break;
       }
       if (!posts.length) break;
-
       for (const post of posts) {
         if (seen.has(post.slug)) continue;
         seen.add(post.slug);
         const title = decodeHtml(post.title.rendered);
-        const parsed = parseChapterTitle(title);
-        chapters.push({
-          name: title,
-          path: post.slug,
-          releaseTime: post.date,
-          part: parsed.part,
-          chapterNumber: parsed.chapter,
-          discoveryIndex: chapters.length,
-        });
+        const parsed = parseTitle(title);
+        chapters.push({ name: title, path: post.slug, releaseTime: post.date, part: parsed.part, chapterNumber: parsed.chapter, seriesKey: parsed.seriesKey, discoveryIndex: chapters.length });
       }
       if (posts.length < 100) break;
     }
 
-    const isTCF = /trash[- ]of[- ]the[- ]count|count'?s[- ]family|tcf/i.test(`${category.name} ${category.slug}`);
+    // For the main TCF category, only the main novel posts belong in the TCF entry.
+    // EAP also places fanfiction/spinoffs such as Cheapskate in this category, so
+    // recognizable spin-off titles are excluded from the main chapter list.
+    if (novelPath === 'tcf') {
+      const filtered = chapters.filter(c => c.seriesKey === 'tcf');
+      return this.buildNovel(category, filtered);
+    }
 
-    if (isTCF) {
-      // TCF's WordPress publication dates are not a reliable representation
-      // of the logical chapter sequence because older chapters were imported
-      // in batches. For TCF, the title's explicit chapter number is therefore
-      // the authoritative order. Part 2 is deliberately placed after Part 1.
-      // Dates remain the tie-breaker and are never exposed as a sorting key
-      // that could make chapters jump across the logical sequence.
-      chapters.sort((a, b) => {
+    return this.buildNovel(category, chapters);
+  }
+
+  private buildNovel(category: WpCategory, chapters: ChapterRecord[]): Plugin.SourceNovel {
+    const isTCF = category.slug === 'tcf' || /trash of the count/i.test(category.name);
+    chapters.sort((a, b) => {
+      if (isTCF) {
         const ap = a.part ?? 1;
         const bp = b.part ?? 1;
         if (ap !== bp) return ap - bp;
-
         const ac = a.chapterNumber ?? Number.MAX_SAFE_INTEGER;
         const bc = b.chapterNumber ?? Number.MAX_SAFE_INTEGER;
         if (ac !== bc) return ac - bc;
-
-        const ad = a.releaseTime ? Date.parse(a.releaseTime) : Number.MAX_SAFE_INTEGER;
-        const bd = b.releaseTime ? Date.parse(b.releaseTime) : Number.MAX_SAFE_INTEGER;
-        if (ad !== bd) return ad - bd;
-        return a.discoveryIndex - b.discoveryIndex;
-      });
-    } else {
-      // Other EAP series continue to use chronological publication order.
-      chapters.sort((a, b) => {
-        const ad = a.releaseTime ? Date.parse(a.releaseTime) : Number.MAX_SAFE_INTEGER;
-        const bd = b.releaseTime ? Date.parse(b.releaseTime) : Number.MAX_SAFE_INTEGER;
-        return ad !== bd ? ad - bd : a.discoveryIndex - b.discoveryIndex;
-      });
-    }
-
+      }
+      const ad = a.releaseTime ? Date.parse(a.releaseTime) : Number.MAX_SAFE_INTEGER;
+      const bd = b.releaseTime ? Date.parse(b.releaseTime) : Number.MAX_SAFE_INTEGER;
+      return ad !== bd ? ad - bd : a.discoveryIndex - b.discoveryIndex;
+    });
     return {
       name: category.name,
       path: category.slug,
       cover: defaultCover,
       summary: category.description ? stripHtml(category.description) : `Chapters published under ${category.name}.`,
-      chapters: chapters.map(({ part, chapterNumber, discoveryIndex, ...chapter }) => chapter),
+      chapters: chapters.map(({ part, chapterNumber, seriesKey, discoveryIndex, ...chapter }) => chapter),
     };
   }
 
@@ -117,15 +103,28 @@ function decodeHtml(value: string): string {
 
 function stripHtml(value: string): string { return value.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim(); }
 
-function parseChapterTitle(title: string): { part: number; chapter: number | undefined } {
-  const part2 = /\bpart\s*2\s*chapter\s*(\d+(?:\.\d+)?)/i.exec(title);
-  if (part2) return { part: 2, chapter: Number(part2[1]) };
-  const normal = /\bchapter\s*(\d+(?:\.\d+)?)/i.exec(title);
-  return { part: 1, chapter: normal ? Number(normal[1]) : undefined };
+function parseTitle(title: string): { seriesKey: string; part: number; chapter: number | undefined } {
+  const normalized = title.replace(/[’‘]/g, "'").replace(/[–—]/g, '-').trim();
+  const part2 = /^trash of the count's family\s+part\s*2\s+chapter\s*(\d+(?:\.\d+)?)/i.exec(normalized);
+  if (part2) return { seriesKey: 'tcf', part: 2, chapter: Number(part2[1]) };
+  const main = /^trash of the count's family\s*(?:-\s*)?chapter\s*(\d+(?:\.\d+)?)/i.exec(normalized);
+  if (main) return { seriesKey: 'tcf', part: 1, chapter: Number(main[1]) };
+
+  // Recognize TCF spin-offs by their title prefix, so each can later be exposed
+  // as a separate NovelItem instead of being mixed into the main TCF entry.
+  const spin = /^(.*?)\s*-\s*chapter\s*(\d+(?:\.\d+)?)/i.exec(normalized);
+  if (spin && /count's family/i.test(spin[1])) {
+    return { seriesKey: slugify(spin[1]), part: 1, chapter: Number(spin[2]) };
+  }
+  return { seriesKey: 'other', part: 1, chapter: undefined };
+}
+
+function slugify(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 }
 
 type WpCategory = { id: number; name: string; slug: string; description: string; count: number };
 type WpPost = { slug: string; date: string; title: { rendered: string }; content?: { rendered: string } };
-type ChapterRecord = Plugin.ChapterItem & { part: number; chapterNumber?: number; discoveryIndex: number };
+type ChapterRecord = Plugin.ChapterItem & { seriesKey: string; part: number; chapterNumber?: number; discoveryIndex: number };
 
 export default new EatApplePies();
