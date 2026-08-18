@@ -7,7 +7,7 @@ class EatApplePies implements Plugin.PluginBase {
   name = 'EatApplePies';
   icon = 'src/en/eatapplepies/icon.svg';
   site = 'https://eatapplepies.com/';
-  version = '1.0.12';
+  version = '1.0.13';
 
   private async wp<T>(endpoint: string): Promise<T> {
     const response = await fetchApi(`${this.site}wp-json/wp/v2/${endpoint}`);
@@ -32,46 +32,56 @@ class EatApplePies implements Plugin.PluginBase {
     const category = categories[0];
     if (!category) return { name: novelPath, path: novelPath, cover: defaultCover, chapters: [] };
 
-    const chapters: ChapterWithIndex[] = [];
+    const chapters: ChapterRecord[] = [];
     const seen = new Set<string>();
     const totalPages = Math.ceil(category.count / 100);
 
-    // Only request the number of pages that this category actually contains.
-    // This avoids the old 250-page upper bound and keeps large categories fast.
     for (let page = 1; page <= totalPages; page++) {
       let posts: WpPost[];
       try {
-        posts = await this.wp<WpPost[]>(
-          `posts?categories=${category.id}&per_page=100&page=${page}&orderby=date&order=asc&_fields=slug,date,title`
-        );
+        posts = await this.wp<WpPost[]>(`posts?categories=${category.id}&per_page=100&page=${page}&orderby=date&order=asc&_fields=slug,date,title`);
       } catch {
         break;
       }
-
       if (!posts.length) break;
 
       for (const post of posts) {
         if (seen.has(post.slug)) continue;
         seen.add(post.slug);
+        const title = decodeHtml(post.title.rendered);
+        const parsed = parseChapterTitle(title);
         chapters.push({
-          name: decodeHtml(post.title.rendered),
+          name: title,
           path: post.slug,
           releaseTime: post.date,
+          part: parsed.part,
+          chapterNumber: parsed.chapter,
           discoveryIndex: chapters.length,
         });
       }
-
       if (posts.length < 100) break;
     }
 
-    // EAP's WordPress publication timestamp is the sole ordering key.
-    // For identical timestamps, preserve the API's stable order.
-    // No chapter number is exposed because LNReader may independently sort
-    // chapterNumber and would incorrectly mix TCF and TCF Part 2.
+    // EAP historically imported many older chapters in batches. Their
+    // WordPress dates can therefore tie (or otherwise fail to represent the
+    // logical chapter sequence). Use date first, then the logical chapter
+    // position as a deterministic tie-breaker. The parsed number stays
+    // internal and is never returned to LNReader, so LNReader cannot perform
+    // a second, conflicting sort.
     chapters.sort((a, b) => {
       const ad = a.releaseTime ? Date.parse(a.releaseTime) : Number.MAX_SAFE_INTEGER;
       const bd = b.releaseTime ? Date.parse(b.releaseTime) : Number.MAX_SAFE_INTEGER;
-      return ad !== bd ? ad - bd : a.discoveryIndex - b.discoveryIndex;
+      if (ad !== bd) return ad - bd;
+
+      const ap = a.part ?? 1;
+      const bp = b.part ?? 1;
+      if (ap !== bp) return ap - bp;
+
+      const ac = a.chapterNumber ?? Number.MAX_SAFE_INTEGER;
+      const bc = b.chapterNumber ?? Number.MAX_SAFE_INTEGER;
+      if (ac !== bc) return ac - bc;
+
+      return a.discoveryIndex - b.discoveryIndex;
     });
 
     return {
@@ -79,7 +89,7 @@ class EatApplePies implements Plugin.PluginBase {
       path: category.slug,
       cover: defaultCover,
       summary: category.description ? stripHtml(category.description) : `Chapters published under ${category.name}.`,
-      chapters: chapters.map(({ discoveryIndex, ...chapter }) => chapter),
+      chapters: chapters.map(({ part, chapterNumber, discoveryIndex, ...chapter }) => chapter),
     };
   }
 
@@ -97,8 +107,15 @@ function decodeHtml(value: string): string {
 
 function stripHtml(value: string): string { return value.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim(); }
 
+function parseChapterTitle(title: string): { part: number; chapter: number | undefined } {
+  const part2 = /\bpart\s*2\s*chapter\s*(\d+(?:\.\d+)?)/i.exec(title);
+  if (part2) return { part: 2, chapter: Number(part2[1]) };
+  const normal = /\bchapter\s*(\d+(?:\.\d+)?)/i.exec(title);
+  return { part: 1, chapter: normal ? Number(normal[1]) : undefined };
+}
+
 type WpCategory = { id: number; name: string; slug: string; description: string; count: number };
 type WpPost = { slug: string; date: string; title: { rendered: string }; content?: { rendered: string } };
-type ChapterWithIndex = Plugin.ChapterItem & { discoveryIndex: number };
+type ChapterRecord = Plugin.ChapterItem & { part: number; chapterNumber?: number; discoveryIndex: number };
 
 export default new EatApplePies();
