@@ -7,7 +7,7 @@ class EatApplePies implements Plugin.PluginBase {
   name = 'EatApplePies';
   icon = 'src/en/eatapplepies/icon.svg';
   site = 'https://eatapplepies.com/';
-  version = '1.0.13';
+  version = '1.0.14';
 
   private async wp<T>(endpoint: string): Promise<T> {
     const response = await fetchApi(`${this.site}wp-json/wp/v2/${endpoint}`);
@@ -62,27 +62,37 @@ class EatApplePies implements Plugin.PluginBase {
       if (posts.length < 100) break;
     }
 
-    // EAP historically imported many older chapters in batches. Their
-    // WordPress dates can therefore tie (or otherwise fail to represent the
-    // logical chapter sequence). Use date first, then the logical chapter
-    // position as a deterministic tie-breaker. The parsed number stays
-    // internal and is never returned to LNReader, so LNReader cannot perform
-    // a second, conflicting sort.
-    chapters.sort((a, b) => {
-      const ad = a.releaseTime ? Date.parse(a.releaseTime) : Number.MAX_SAFE_INTEGER;
-      const bd = b.releaseTime ? Date.parse(b.releaseTime) : Number.MAX_SAFE_INTEGER;
-      if (ad !== bd) return ad - bd;
+    const isTCF = /trash[- ]of[- ]the[- ]count|count'?s[- ]family|tcf/i.test(`${category.name} ${category.slug}`);
 
-      const ap = a.part ?? 1;
-      const bp = b.part ?? 1;
-      if (ap !== bp) return ap - bp;
+    if (isTCF) {
+      // TCF's WordPress publication dates are not a reliable representation
+      // of the logical chapter sequence because older chapters were imported
+      // in batches. For TCF, the title's explicit chapter number is therefore
+      // the authoritative order. Part 2 is deliberately placed after Part 1.
+      // Dates remain the tie-breaker and are never exposed as a sorting key
+      // that could make chapters jump across the logical sequence.
+      chapters.sort((a, b) => {
+        const ap = a.part ?? 1;
+        const bp = b.part ?? 1;
+        if (ap !== bp) return ap - bp;
 
-      const ac = a.chapterNumber ?? Number.MAX_SAFE_INTEGER;
-      const bc = b.chapterNumber ?? Number.MAX_SAFE_INTEGER;
-      if (ac !== bc) return ac - bc;
+        const ac = a.chapterNumber ?? Number.MAX_SAFE_INTEGER;
+        const bc = b.chapterNumber ?? Number.MAX_SAFE_INTEGER;
+        if (ac !== bc) return ac - bc;
 
-      return a.discoveryIndex - b.discoveryIndex;
-    });
+        const ad = a.releaseTime ? Date.parse(a.releaseTime) : Number.MAX_SAFE_INTEGER;
+        const bd = b.releaseTime ? Date.parse(b.releaseTime) : Number.MAX_SAFE_INTEGER;
+        if (ad !== bd) return ad - bd;
+        return a.discoveryIndex - b.discoveryIndex;
+      });
+    } else {
+      // Other EAP series continue to use chronological publication order.
+      chapters.sort((a, b) => {
+        const ad = a.releaseTime ? Date.parse(a.releaseTime) : Number.MAX_SAFE_INTEGER;
+        const bd = b.releaseTime ? Date.parse(b.releaseTime) : Number.MAX_SAFE_INTEGER;
+        return ad !== bd ? ad - bd : a.discoveryIndex - b.discoveryIndex;
+      });
+    }
 
     return {
       name: category.name,
