@@ -5,9 +5,9 @@ import { defaultCover } from '@libs/defaultCover';
 class EatApplePies implements Plugin.PluginBase {
   id = 'eatapplepies';
   name = 'EatApplePies';
-  icon = 'src/en/eatapplepies/icon.svg';
+  icon = 'src/en/eatapplepies/icon.png';
   site = 'https://eatapplepies.com/';
-  version = '1.0.18';
+  version = '1.0.20';
 
   private categoryCache = new Map<string, WpCategory>();
   private novelCache = new Map<string, CachedNovel>();
@@ -71,19 +71,15 @@ class EatApplePies implements Plugin.PluginBase {
   private async fetchAllChapters(categoryId: number): Promise<ChapterRecord[]> {
     const chapters: ChapterRecord[] = [];
     const seen = new Set<string>();
-
     for (let page = 1; ; page++) {
       let posts: WpPost[];
       try {
         posts = await this.wp<WpPost[]>(`posts?categories=${categoryId}&per_page=100&page=${page}&orderby=date&order=asc&_fields=slug,date,title`);
-      } catch {
-        break;
-      }
+      } catch { break; }
       if (!posts.length) break;
       this.appendChapterPosts(chapters, seen, posts);
       if (posts.length < 100) break;
     }
-
     return chapters;
   }
 
@@ -91,49 +87,23 @@ class EatApplePies implements Plugin.PluginBase {
     const merged = cached.slice();
     const known = new Set(cached.map(chapter => chapter.path));
     const discovered: ChapterRecord[] = [];
-
-    // WordPress returns newest posts first here. Normally the first request
-    // reaches a chapter already in cache, so only one request is needed.
-    // If more than 100 chapters appeared since the last refresh, keep paging
-    // until we hit a known chapter so no newly published chapters are missed.
     for (let page = 1; ; page++) {
       let posts: WpPost[];
       try {
         posts = await this.wp<WpPost[]>(`posts?categories=${categoryId}&per_page=100&page=${page}&orderby=date&order=desc&_fields=slug,date,title`);
-      } catch {
-        return cached;
-      }
+      } catch { return cached; }
       if (!posts.length) break;
-
       let hitKnownChapter = false;
       for (const post of posts) {
-        if (known.has(post.slug)) {
-          hitKnownChapter = true;
-          continue;
-        }
+        if (known.has(post.slug)) { hitKnownChapter = true; continue; }
         const title = decodeHtml(post.title?.rendered || '');
         const parsed = parseTitle(title);
-        discovered.push({
-          name: title,
-          path: post.slug,
-          releaseTime: post.date,
-          part: parsed.part,
-          chapterNumber: parsed.chapter,
-          seriesKey: parsed.seriesKey,
-          discoveryIndex: 0,
-        });
+        discovered.push({ name: title, path: post.slug, releaseTime: post.date, part: parsed.part, chapterNumber: parsed.chapter, seriesKey: parsed.seriesKey, discoveryIndex: 0 });
       }
-
       if (hitKnownChapter || posts.length < 100) break;
     }
-
-    // Preserve the original discovery order for stable tie-breaking, then
-    // append only genuinely new slugs to the cached list.
     discovered.reverse();
-    for (const chapter of discovered) {
-      chapter.discoveryIndex = merged.length;
-      merged.push(chapter);
-    }
+    for (const chapter of discovered) { chapter.discoveryIndex = merged.length; merged.push(chapter); }
     return merged;
   }
 
@@ -143,15 +113,7 @@ class EatApplePies implements Plugin.PluginBase {
       seen.add(post.slug);
       const title = decodeHtml(post.title?.rendered || '');
       const parsed = parseTitle(title);
-      chapters.push({
-        name: title,
-        path: post.slug,
-        releaseTime: post.date,
-        part: parsed.part,
-        chapterNumber: parsed.chapter,
-        seriesKey: parsed.seriesKey,
-        discoveryIndex: chapters.length,
-      });
+      chapters.push({ name: title, path: post.slug, releaseTime: post.date, part: parsed.part, chapterNumber: parsed.chapter, seriesKey: parsed.seriesKey, discoveryIndex: chapters.length });
     }
   }
 
@@ -168,13 +130,7 @@ class EatApplePies implements Plugin.PluginBase {
       const bd = b.releaseTime ? Date.parse(b.releaseTime) : Number.MAX_SAFE_INTEGER;
       return ad !== bd ? ad - bd : a.discoveryIndex - b.discoveryIndex;
     });
-    return {
-      name: category.name,
-      path: category.slug,
-      cover,
-      summary: category.description ? stripHtml(category.description) : `Chapters published under ${category.name}.`,
-      chapters: chapters.map(({ part, chapterNumber, seriesKey, discoveryIndex, ...chapter }) => chapter),
-    };
+    return { name: category.name, path: category.slug, cover, summary: category.description ? stripHtml(category.description) : `Chapters published under ${category.name}.`, chapters: chapters.map(({ part, chapterNumber, seriesKey, discoveryIndex, ...chapter }) => chapter) };
   }
 
   async parseChapter(chapterPath: string): Promise<string> {
@@ -185,9 +141,7 @@ class EatApplePies implements Plugin.PluginBase {
   resolveUrl = (path: string) => `${this.site}${path.replace(/^\//, '')}/`;
 }
 
-function decodeHtml(value: string): string {
-  return value.replace(/&#8217;|&#x2019;/gi, "'").replace(/&#8216;|&#x2018;/gi, "'").replace(/&#8220;|&#x201C;/gi, '"').replace(/&#8221;|&#x201D;/gi, '"').replace(/&#8211;|&#x2013;/gi, '–').replace(/&#8212;|&#x2014;/gi, '—').replace(/&#038;|&amp;/gi, '&');
-}
+function decodeHtml(value: string): string { return value.replace(/&#8217;|&#x2019;/gi, "'").replace(/&#8216;|&#x2018;/gi, "'").replace(/&#8220;|&#x201C;/gi, '"').replace(/&#8221;|&#x201D;/gi, '"').replace(/&#8211;|&#x2013;/gi, '–').replace(/&#8212;|&#x2014;/gi, '—').replace(/&#038;|&amp;/gi, '&'); }
 function stripHtml(value: string): string { return value.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim(); }
 function parseTitle(title: string): { seriesKey: string; part: number; chapter: number | undefined } {
   const normalized = title.replace(/[’‘]/g, "'").replace(/[–—]/g, '-').trim();
