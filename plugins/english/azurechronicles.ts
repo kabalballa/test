@@ -8,7 +8,7 @@ class AzureChronicles implements Plugin.PluginBase {
   name = 'Azure Chronicles';
   icon = 'src/en/azurechronicles/icon.svg';
   site = 'https://azurechronicles.com/';
-  version = '1.0.0';
+  version = '1.0.1';
 
   private novelCache = new Map<string, Plugin.SourceNovel>();
 
@@ -180,7 +180,7 @@ function normalize(value: string): string {
 }
 
 function escapeHtml(value: string): string {
-  return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\"/g, '&quot;');
 }
 
 export default new AzureChronicles();
