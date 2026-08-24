@@ -32,18 +32,29 @@ jobs:
         working-directory: upstream
         run: npm ci
 
-      - name: Copy EatApplePies plugin into upstream tree
+      - name: Copy plugins into upstream tree
         run: |
           set -euo pipefail
+
           mkdir -p upstream/plugins/english
+
           EAP_SOURCE=$(find plugins/english -maxdepth 1 -type f -name 'eatapplepies*.ts' -print | sort | tail -n 1)
           test -n "$EAP_SOURCE"
           echo "Using EatApplePies source: $EAP_SOURCE"
           cp "$EAP_SOURCE" upstream/plugins/english/eatapplepies.ts
 
+          AZURE_SOURCE=$(find plugins/english -maxdepth 1 -type f -name 'azurechronicles*.ts' -print | sort | tail -n 1)
+          test -n "$AZURE_SOURCE"
+          echo "Using Azure Chronicles source: $AZURE_SOURCE"
+          cp "$AZURE_SOURCE" upstream/plugins/english/azurechronicles.ts
+
           mkdir -p upstream/public/static/src/en/eatapplepies
           test -f plugins/english/eatapplepies.svg
           cp plugins/english/eatapplepies.svg upstream/public/static/src/en/eatapplepies/icon.svg
+
+          mkdir -p upstream/public/static/src/en/azurechronicles
+          test -f plugins/english/azurechronicles.svg
+          cp plugins/english/azurechronicles.svg upstream/public/static/src/en/azurechronicles/icon.svg
 
       - name: Build plugin manifest
         working-directory: upstream
@@ -51,17 +62,22 @@ jobs:
           npm run build:compile
           npm run build:manifest
 
-      - name: Fix EatApplePies URLs
+      - name: Fix plugin URLs
         working-directory: upstream
         run: |
           set -euo pipefail
+
           EAP_JS_URL='https://raw.githubusercontent.com/kabalballa/test/plugins/v3.0.0/.js/plugins/english/eatapplepies.js'
           EAP_ICON_URL='https://raw.githubusercontent.com/kabalballa/test/plugins/v3.0.0/public/static/src/en/eatapplepies/icon.svg'
+          AZURE_JS_URL='https://raw.githubusercontent.com/kabalballa/test/plugins/v3.0.0/.js/plugins/english/azurechronicles.js'
+          AZURE_ICON_URL='https://raw.githubusercontent.com/kabalballa/test/plugins/v3.0.0/public/static/src/en/azurechronicles/icon.svg'
 
-          sed -i "s#https://raw.githubusercontent.com/lnreader/lnreader-plugins/master/.js/src/plugins/english/eatapplepies.js#$EAP_JS_URL#g" .dist/plugins.json
-          sed -i "s#https://raw.githubusercontent.com/lnreader/lnreader-plugins/master/public/static/src/en/eatapplepies/icon.svg#$EAP_ICON_URL#g" .dist/plugins.json
-          sed -i "s#https://raw.githubusercontent.com/lnreader/lnreader-plugins/master/.js/src/plugins/english/eatapplepies.js#$EAP_JS_URL#g" .dist/plugins.min.json
-          sed -i "s#https://raw.githubusercontent.com/lnreader/lnreader-plugins/master/public/static/src/en/eatapplepies/icon.svg#$EAP_ICON_URL#g" .dist/plugins.min.json
+          for FILE in .dist/plugins.json .dist/plugins.min.json; do
+            sed -i "s#https://raw.githubusercontent.com/lnreader/lnreader-plugins/master/.js/src/plugins/english/eatapplepies.js#$EAP_JS_URL#g" "$FILE"
+            sed -i "s#https://raw.githubusercontent.com/lnreader/lnreader-plugins/master/public/static/src/en/eatapplepies/icon.svg#$EAP_ICON_URL#g" "$FILE"
+            sed -i "s#https://raw.githubusercontent.com/lnreader/lnreader-plugins/master/.js/src/plugins/english/azurechronicles.js#$AZURE_JS_URL#g" "$FILE"
+            sed -i "s#https://raw.githubusercontent.com/lnreader/lnreader-plugins/master/public/static/src/en/azurechronicles/icon.svg#$AZURE_ICON_URL#g" "$FILE"
+          done
 
       - name: Publish generated files
         env:
@@ -76,6 +92,6 @@ jobs:
           git checkout --orphan publish
           git rm -rf . 2>/dev/null || true
 
-          git add -f .js .dist public/static/src/en/eatapplepies
-          git commit -m "Build EatApplePies plugin"
+          git add -f .js .dist public/static/src/en/eatapplepies public/static/src/en/azurechronicles
+          git commit -m "Build EatApplePies and Azure Chronicles plugins"
           git push https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git HEAD:refs/heads/plugins/v3.0.0 --force
