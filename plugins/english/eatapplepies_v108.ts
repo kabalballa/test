@@ -9,6 +9,9 @@ class EatApplePies implements Plugin.PluginBase {
   site = 'https://eatapplepies.com/';
   version = '1.0.18';
 
+  private categoryCache = new Map<string, WpCategory>();
+  private novelCache = new Map<string, CachedNovel>();
+
   private async wp<T>(endpoint: string): Promise<T> {
     const response = await fetchApi(`${this.site}wp-json/wp/v2/${endpoint}`);
     if (!response.ok) throw new Error(`EatApplePies API returned ${response.status}`);
@@ -29,46 +32,127 @@ class EatApplePies implements Plugin.PluginBase {
     }
   }
 
-  async popularNovels(pageNo: number): Promise<Plugin.NovelItem[]> {
+  popularNovels = async (pageNo: number): Promise<Plugin.NovelItem[]> => {
     if (pageNo < 1 || pageNo > 10) return [];
     const categories = await this.wp<WpCategory[]>(`categories?per_page=100&page=${pageNo}&hide_empty=true&orderby=name&order=asc&_fields=id,name,slug,description,count`);
     return Promise.all(categories.filter(c => c.slug !== 'uncategorized' && c.count > 0).map(async c => ({ name: c.name, path: c.slug, cover: await this.categoryCover(c.id) })));
-  }
+  };
 
-  async searchNovels(searchTerm: string, pageNo: number): Promise<Plugin.NovelItem[]> {
+  searchNovels = async (searchTerm: string, pageNo: number): Promise<Plugin.NovelItem[]> => {
     if (!searchTerm.trim() || pageNo < 1) return [];
     const categories = await this.wp<WpCategory[]>(`categories?search=${encodeURIComponent(searchTerm)}&per_page=100&page=${pageNo}&hide_empty=true&_fields=id,name,slug,description,count`);
     return Promise.all(categories.filter(c => c.slug !== 'uncategorized' && c.count > 0).map(async c => ({ name: c.name, path: c.slug, cover: await this.categoryCover(c.id) })));
-  }
+  };
 
   async parseNovel(novelPath: string): Promise<Plugin.SourceNovel> {
-    const categories = await this.wp<WpCategory[]>(`categories?slug=${encodeURIComponent(novelPath)}&per_page=1&_fields=id,name,slug,description,count`);
-    const category = categories[0];
-    if (!category) return { name: novelPath, path: novelPath, cover: defaultCover, chapters: [] };
+    let category = this.categoryCache.get(novelPath);
+    if (!category) {
+      const categories = await this.wp<WpCategory[]>(`categories?slug=${encodeURIComponent(novelPath)}&per_page=1&_fields=id,name,slug,description,count`);
+      category = categories[0];
+      if (!category) return { name: novelPath, path: novelPath, cover: defaultCover, chapters: [] };
+      this.categoryCache.set(novelPath, category);
+    }
 
+    let cached = this.novelCache.get(novelPath);
+    if (!cached) {
+      const chapters = await this.fetchAllChapters(category.id);
+      const cover = await this.categoryCover(category.id);
+      cached = { chapters, cover };
+      this.novelCache.set(novelPath, cached);
+    } else {
+      cached.chapters = await this.fetchNewChapters(category.id, cached.chapters);
+    }
+
+    const chapters = cached.chapters.slice();
+    if (novelPath === 'tcf') return this.buildNovel(category, chapters.filter(c => c.seriesKey === 'tcf'), cached.cover);
+    return this.buildNovel(category, chapters, cached.cover);
+  }
+
+  private async fetchAllChapters(categoryId: number): Promise<ChapterRecord[]> {
     const chapters: ChapterRecord[] = [];
     const seen = new Set<string>();
-    const totalPages = Math.ceil(category.count / 100);
 
-    for (let page = 1; page <= totalPages; page++) {
+    for (let page = 1; ; page++) {
       let posts: WpPost[];
       try {
-        posts = await this.wp<WpPost[]>(`posts?categories=${category.id}&per_page=100&page=${page}&orderby=date&order=asc&_fields=slug,date,title`);
-      } catch { break; }
-      if (!posts.length) break;
-      for (const post of posts) {
-        if (seen.has(post.slug)) continue;
-        seen.add(post.slug);
-        const title = decodeHtml(post.title?.rendered || '');
-        const parsed = parseTitle(title);
-        chapters.push({ name: title, path: post.slug, releaseTime: post.date, part: parsed.part, chapterNumber: parsed.chapter, seriesKey: parsed.seriesKey, discoveryIndex: chapters.length });
+        posts = await this.wp<WpPost[]>(`posts?categories=${categoryId}&per_page=100&page=${page}&orderby=date&order=asc&_fields=slug,date,title`);
+      } catch {
+        break;
       }
+      if (!posts.length) break;
+      this.appendChapterPosts(chapters, seen, posts);
       if (posts.length < 100) break;
     }
 
-    const cover = await this.categoryCover(category.id);
-    if (novelPath === 'tcf') return this.buildNovel(category, chapters.filter(c => c.seriesKey === 'tcf'), cover);
-    return this.buildNovel(category, chapters, cover);
+    return chapters;
+  }
+
+  private async fetchNewChapters(categoryId: number, cached: ChapterRecord[]): Promise<ChapterRecord[]> {
+    const merged = cached.slice();
+    const known = new Set(cached.map(chapter => chapter.path));
+    const discovered: ChapterRecord[] = [];
+
+    // WordPress returns newest posts first here. Normally the first request
+    // reaches a chapter already in cache, so only one request is needed.
+    // If more than 100 chapters appeared since the last refresh, keep paging
+    // until we hit a known chapter so no newly published chapters are missed.
+    for (let page = 1; ; page++) {
+      let posts: WpPost[];
+      try {
+        posts = await this.wp<WpPost[]>(`posts?categories=${categoryId}&per_page=100&page=${page}&orderby=date&order=desc&_fields=slug,date,title`);
+      } catch {
+        return cached;
+      }
+      if (!posts.length) break;
+
+      let hitKnownChapter = false;
+      for (const post of posts) {
+        if (known.has(post.slug)) {
+          hitKnownChapter = true;
+          continue;
+        }
+        const title = decodeHtml(post.title?.rendered || '');
+        const parsed = parseTitle(title);
+        discovered.push({
+          name: title,
+          path: post.slug,
+          releaseTime: post.date,
+          part: parsed.part,
+          chapterNumber: parsed.chapter,
+          seriesKey: parsed.seriesKey,
+          discoveryIndex: 0,
+        });
+      }
+
+      if (hitKnownChapter || posts.length < 100) break;
+    }
+
+    // Preserve the original discovery order for stable tie-breaking, then
+    // append only genuinely new slugs to the cached list.
+    discovered.reverse();
+    for (const chapter of discovered) {
+      chapter.discoveryIndex = merged.length;
+      merged.push(chapter);
+    }
+    return merged;
+  }
+
+  private appendChapterPosts(chapters: ChapterRecord[], seen: Set<string>, posts: WpPost[]): void {
+    for (const post of posts) {
+      if (seen.has(post.slug)) continue;
+      seen.add(post.slug);
+      const title = decodeHtml(post.title?.rendered || '');
+      const parsed = parseTitle(title);
+      chapters.push({
+        name: title,
+        path: post.slug,
+        releaseTime: post.date,
+        part: parsed.part,
+        chapterNumber: parsed.chapter,
+        seriesKey: parsed.seriesKey,
+        discoveryIndex: chapters.length,
+      });
+    }
   }
 
   private buildNovel(category: WpCategory, chapters: ChapterRecord[], cover: string): Plugin.SourceNovel {
@@ -120,5 +204,6 @@ function slugify(value: string): string { return value.toLowerCase().replace(/[^
 type WpCategory = { id: number; name: string; slug: string; description: string; count: number };
 type WpPost = { slug: string; date: string; title?: { rendered: string }; content?: { rendered: string }; _embedded?: { 'wp:featuredmedia'?: Array<{ source_url?: string }> } };
 type ChapterRecord = Plugin.ChapterItem & { seriesKey: string; part: number; chapterNumber?: number; discoveryIndex: number };
+type CachedNovel = { chapters: ChapterRecord[]; cover: string };
 
 export default new EatApplePies();
