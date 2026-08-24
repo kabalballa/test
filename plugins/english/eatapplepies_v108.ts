@@ -7,7 +7,7 @@ class EatApplePies implements Plugin.PluginBase {
   name = 'EatApplePies';
   icon = 'src/en/eatapplepies/icon.png';
   site = 'https://eatapplepies.com/';
-  version = '1.0.20';
+  version = '1.1.0';
 
   private categoryCache = new Map<string, WpCategory>();
   private novelCache = new Map<string, CachedNovel>();
