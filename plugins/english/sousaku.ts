@@ -13,7 +13,7 @@ class Sousaku implements Plugin.PluginBase {
   name = 'Sousaku – 創作 – We Create!';
   icon = 'src/en/sousaku/icon.svg';
   site = SITE;
-  version = '1.0.5';
+  version = '1.0.6';
 
   private novelLinksCache: NovelLink[] | null = null;
   private novelCache = new Map<string, CachedNovel>();
