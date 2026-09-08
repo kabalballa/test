@@ -13,15 +13,12 @@ class Sousaku implements Plugin.PluginBase {
   name = 'Sousaku – 創作 – We Create!';
   icon = 'src/en/sousaku/icon.svg';
   site = SITE;
-  version = '1.0.4';
+  version = '1.0.5';
 
   private novelLinksCache: NovelLink[] | null = null;
   private novelCache = new Map<string, CachedNovel>();
   private chapterContentCache = new Map<string, string>();
 
-  // These are the stable ToC pages exposed by Sousaku's main navigation.
-  // Keep them as a fallback because WordPress.com can occasionally return a
-  // different/blocked homepage response to the Android app's HTTP client.
   private readonly knownNovels: NovelLink[] = [
     { name: 'Moto Sekai Ichi Table of Contents', path: 'motto-sekai-ichi-i-no-sub-chara-ikusei-nikki' },
     { name: 'Labyrinth Renovation – Table of contents', path: 'labyrinth-renovation-table-of-contents' },
@@ -29,12 +26,16 @@ class Sousaku implements Plugin.PluginBase {
     { name: 'High Spec Village', path: 'high-spec-village' },
     { name: 'Teihen Ryoushu ToC', path: 'teihen-ryoushi-toc' },
     { name: 'Tensei arasaa joshi – Table of contents', path: 'tensei-arasaa-joshi-table-of-contents' },
+    { name: 'The villainous noble daughter is perfectly fine alone!', path: 'the-villainous-noble-daughter-is-perfectly-fine-alone' },
     { name: 'The Lady of the Underworld – ToC', path: 'the-lady-of-the-underworld' },
     { name: 'Beyond the hero’s death – Table of contents', path: 'beyond-the-heros-death-table-of-contents' },
     { name: 'The abused merchant’s daughter – Table of contents', path: 'the-abused-merchants-daughter-table-of-contents' },
+    { name: 'My Wish was…', path: 'my-wish-was' },
     { name: 'Maseki Gurume – ToC', path: 'maseki-gurume-toc' },
     { name: 'Maseki Gurume LN – ToC', path: 'maseki-gurume-ln-toc' },
     { name: 'Mistaken for the Demon King', path: 'mistaken-for-the-demon-king' },
+    { name: 'Tou no Madoushi', path: 'tou-no-madoushi' },
+    { name: 'In search of a scenery I’ve yet to see.', path: 'in-search-of-a-scenery-i-have-yet-to-see' },
     { name: 'Isekai wo Seigyo Mahou de Kirihirake!', path: 'isekai-wo-seigyo-mahou-de-kirihirake' },
   ];
 
@@ -64,8 +65,6 @@ class Sousaku implements Plugin.PluginBase {
   private async getNovelLinks(): Promise<NovelLink[]> {
     if (this.novelLinksCache) return this.novelLinksCache;
 
-    // Start with the known ToC catalog so results are available even when the
-    // homepage cannot be fetched by the LNReader runtime.
     const links = new Map<string, NovelLink>(this.knownNovels.map(novel => [novel.path, novel]));
 
     try {
@@ -74,36 +73,46 @@ class Sousaku implements Plugin.PluginBase {
         const href = $(element).attr('href');
         const text = $(element).text().replace(/\s+/g, ' ').trim();
         if (!href || !text) return;
-
         const path = this.normalizePath(href);
         if (!path || path.includes('/') || this.isUtilityPage(path)) return;
-
-        // Only merge root-level links that are already known as novel ToCs.
-        // This avoids turning ordinary homepage links into fake novels.
         if (links.has(path)) links.get(path)!.name = text;
       });
     } catch {
-      // Keep the static catalog if the homepage request fails.
+      // Use the built-in catalog when the homepage is unavailable to LNReader.
     }
 
     this.novelLinksCache = [...links.values()];
     return this.novelLinksCache;
   }
 
+  private toNovelItems(links: NovelLink[], pageNo = 1): Plugin.NovelItem[] {
+    const start = Math.max(0, pageNo - 1) * 20;
+    return links.slice(start, start + 20).map(novel => ({
+      name: novel.name,
+      path: novel.path,
+      cover: defaultCover,
+    }));
+  }
+
   async popularNovels(pageNo: number): Promise<Plugin.NovelItem[]> {
     if (pageNo < 1) return [];
-    const links = await this.getNovelLinks();
-    const start = (pageNo - 1) * 20;
-    return links.slice(start, start + 20).map(novel => ({ name: novel.name, path: novel.path, cover: defaultCover }));
+    return this.toNovelItems(await this.getNovelLinks(), pageNo);
   }
 
   async searchNovels(searchTerm: string, pageNo?: number): Promise<Plugin.NovelItem[]> {
-    if (!searchTerm.trim()) return [];
-    const term = searchTerm.trim().toLowerCase();
-    const links = (await this.getNovelLinks()).filter(n => n.name.toLowerCase().includes(term) || n.path.toLowerCase().includes(term));
+    // LNReader can call searchNovels('') when opening the source search screen.
+    // Returning [] here makes the UI show "No results found" before the user
+    // has entered a query. Treat an empty query as a request for the catalog.
     const page = pageNo && pageNo > 0 ? pageNo : 1;
-    const start = (page - 1) * 20;
-    return links.slice(start, start + 20).map(novel => ({ name: novel.name, path: novel.path, cover: defaultCover }));
+    const links = await this.getNovelLinks();
+
+    if (!searchTerm.trim()) return this.toNovelItems(links, page);
+
+    const term = searchTerm.trim().toLowerCase();
+    const matches = links.filter(n =>
+      n.name.toLowerCase().includes(term) || n.path.toLowerCase().includes(term),
+    );
+    return this.toNovelItems(matches, page);
   }
 
   async parseNovel(novelPath: string): Promise<Plugin.SourceNovel> {
@@ -112,7 +121,13 @@ class Sousaku implements Plugin.PluginBase {
       cached = await this.fetchNovel(novelPath);
       this.novelCache.set(novelPath, cached);
     }
-    return { name: cached.name, path: novelPath, cover: cached.cover, summary: cached.summary, chapters: cached.chapters.slice() };
+    return {
+      name: cached.name,
+      path: novelPath,
+      cover: cached.cover,
+      summary: cached.summary,
+      chapters: cached.chapters.slice(),
+    };
   }
 
   private async fetchNovel(novelPath: string): Promise<CachedNovel> {
