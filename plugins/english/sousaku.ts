@@ -13,7 +13,7 @@ class Sousaku implements Plugin.PluginBase {
   name = 'Sousaku – 創作 – We Create!';
   icon = 'src/en/sousaku/icon.svg';
   site = SITE;
-  version = '1.0.2';
+  version = '1.0.3';
 
   private novelLinksCache: NovelLink[] | null = null;
   private novelCache = new Map<string, CachedNovel>();
@@ -30,14 +30,14 @@ class Sousaku implements Plugin.PluginBase {
       const url = new URL(href, this.site);
       if (url.origin !== new URL(this.site).origin) return null;
       const pathname = url.pathname.replace(/^\/+|\/+$/g, '');
-      return pathname ? pathname : null;
+      return pathname || null;
     } catch {
       return null;
     }
   }
 
   private isUtilityPage(path: string): boolean {
-    return /^(category|tag|author|page|feed|comments|wp-|search|about-us|contact-us|discord|donate|privacy-policy)(\/|$)/i.test(path)
+    return /^(category|tag|author|page|feed|comments|wp-|search|about|about-us|contact|contact-us|discord|donate|privacy-policy|patreon)(\/|$)/i.test(path)
       || /^\d{4}(\/|$)/.test(path)
       || /\.(xml|rss|atom|jpg|jpeg|png|gif|webp|svg|pdf)$/i.test(path);
   }
@@ -48,19 +48,16 @@ class Sousaku implements Plugin.PluginBase {
     const $ = load(await this.getHtml());
     const links = new Map<string, NovelLink>();
 
-    // Sousaku's novel ToCs are stable root-level pages. Chapter posts either
-    // use dated URLs or nested novel/chapter URLs, so limiting discovery to
-    // root-level internal pages prevents chapter posts from becoming novels.
+    // Sousaku exposes its novel ToC pages as root-level links. Do not use a
+    // title/slug keyword whitelist: several legitimate novels have names that
+    // do not contain predictable words such as "novel", "hero", or "world".
     $('a[href]').each((_, element) => {
       const href = $(element).attr('href');
       const text = $(element).text().replace(/\s+/g, ' ').trim();
       if (!href || !text) return;
-      const path = this.normalizePath(href);
-      if (!path || this.isUtilityPage(path) || path.includes('/')) return;
 
-      const slug = path.toLowerCase();
-      const looksLikeNovel = /table[- ]of[- ]contents|\btoc\b|novel|village|ryoush|sekai|world|labyrinth|hero|daughter|joshi|maseki|tensei|renovation/i.test(`${slug} ${text}`);
-      if (!looksLikeNovel) return;
+      const path = this.normalizePath(href);
+      if (!path || path.includes('/') || this.isUtilityPage(path)) return;
 
       if (!links.has(path)) links.set(path, { name: text, path });
     });
