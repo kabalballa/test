@@ -13,11 +13,30 @@ class Sousaku implements Plugin.PluginBase {
   name = 'Sousaku – 創作 – We Create!';
   icon = 'src/en/sousaku/icon.svg';
   site = SITE;
-  version = '1.0.3';
+  version = '1.0.4';
 
   private novelLinksCache: NovelLink[] | null = null;
   private novelCache = new Map<string, CachedNovel>();
   private chapterContentCache = new Map<string, string>();
+
+  // These are the stable ToC pages exposed by Sousaku's main navigation.
+  // Keep them as a fallback because WordPress.com can occasionally return a
+  // different/blocked homepage response to the Android app's HTTP client.
+  private readonly knownNovels: NovelLink[] = [
+    { name: 'Moto Sekai Ichi Table of Contents', path: 'motto-sekai-ichi-i-no-sub-chara-ikusei-nikki' },
+    { name: 'Labyrinth Renovation – Table of contents', path: 'labyrinth-renovation-table-of-contents' },
+    { name: 'Only I know that the world will end – Table of Contents', path: 'only-i-know-that-the-world-will-end' },
+    { name: 'High Spec Village', path: 'high-spec-village' },
+    { name: 'Teihen Ryoushu ToC', path: 'teihen-ryoushi-toc' },
+    { name: 'Tensei arasaa joshi – Table of contents', path: 'tensei-arasaa-joshi-table-of-contents' },
+    { name: 'The Lady of the Underworld – ToC', path: 'the-lady-of-the-underworld' },
+    { name: 'Beyond the hero’s death – Table of contents', path: 'beyond-the-heros-death-table-of-contents' },
+    { name: 'The abused merchant’s daughter – Table of contents', path: 'the-abused-merchants-daughter-table-of-contents' },
+    { name: 'Maseki Gurume – ToC', path: 'maseki-gurume-toc' },
+    { name: 'Maseki Gurume LN – ToC', path: 'maseki-gurume-ln-toc' },
+    { name: 'Mistaken for the Demon King', path: 'mistaken-for-the-demon-king' },
+    { name: 'Isekai wo Seigyo Mahou de Kirihirake!', path: 'isekai-wo-seigyo-mahou-de-kirihirake' },
+  ];
 
   private async getHtml(path = ''): Promise<string> {
     const response = await fetchApi(new URL(path, this.site).href);
@@ -45,22 +64,27 @@ class Sousaku implements Plugin.PluginBase {
   private async getNovelLinks(): Promise<NovelLink[]> {
     if (this.novelLinksCache) return this.novelLinksCache;
 
-    const $ = load(await this.getHtml());
-    const links = new Map<string, NovelLink>();
+    // Start with the known ToC catalog so results are available even when the
+    // homepage cannot be fetched by the LNReader runtime.
+    const links = new Map<string, NovelLink>(this.knownNovels.map(novel => [novel.path, novel]));
 
-    // Sousaku exposes its novel ToC pages as root-level links. Do not use a
-    // title/slug keyword whitelist: several legitimate novels have names that
-    // do not contain predictable words such as "novel", "hero", or "world".
-    $('a[href]').each((_, element) => {
-      const href = $(element).attr('href');
-      const text = $(element).text().replace(/\s+/g, ' ').trim();
-      if (!href || !text) return;
+    try {
+      const $ = load(await this.getHtml());
+      $('a[href]').each((_, element) => {
+        const href = $(element).attr('href');
+        const text = $(element).text().replace(/\s+/g, ' ').trim();
+        if (!href || !text) return;
 
-      const path = this.normalizePath(href);
-      if (!path || path.includes('/') || this.isUtilityPage(path)) return;
+        const path = this.normalizePath(href);
+        if (!path || path.includes('/') || this.isUtilityPage(path)) return;
 
-      if (!links.has(path)) links.set(path, { name: text, path });
-    });
+        // Only merge root-level links that are already known as novel ToCs.
+        // This avoids turning ordinary homepage links into fake novels.
+        if (links.has(path)) links.get(path)!.name = text;
+      });
+    } catch {
+      // Keep the static catalog if the homepage request fails.
+    }
 
     this.novelLinksCache = [...links.values()];
     return this.novelLinksCache;
@@ -73,11 +97,12 @@ class Sousaku implements Plugin.PluginBase {
     return links.slice(start, start + 20).map(novel => ({ name: novel.name, path: novel.path, cover: defaultCover }));
   }
 
-  async searchNovels(searchTerm: string, pageNo: number): Promise<Plugin.NovelItem[]> {
-    if (!searchTerm.trim() || pageNo < 1) return [];
+  async searchNovels(searchTerm: string, pageNo?: number): Promise<Plugin.NovelItem[]> {
+    if (!searchTerm.trim()) return [];
     const term = searchTerm.trim().toLowerCase();
     const links = (await this.getNovelLinks()).filter(n => n.name.toLowerCase().includes(term) || n.path.toLowerCase().includes(term));
-    const start = (pageNo - 1) * 20;
+    const page = pageNo && pageNo > 0 ? pageNo : 1;
+    const start = (page - 1) * 20;
     return links.slice(start, start + 20).map(novel => ({ name: novel.name, path: novel.path, cover: defaultCover }));
   }
 
