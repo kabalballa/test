@@ -47,21 +47,33 @@ jobs:
           test -f plugins/english/eatapplepies.svg
           convert plugins/english/eatapplepies.svg -background none -resize 512x512 upstream/public/static/src/en/eatapplepies/icon.png
 
+      - name: Copy Sousaku plugin into upstream tree
+        run: |
+          set -euo pipefail
+          mkdir -p upstream/plugins/english
+          cp plugins/english/sousaku.ts upstream/plugins/english/sousaku.ts
+          mkdir -p upstream/public/static/src/en/sousaku
+          cp plugins/english/sousaku.svg upstream/public/static/src/en/sousaku/icon.svg
+
       - name: Build plugin manifest
         working-directory: upstream
         run: |
           npm run build:compile
           npm run build:manifest
 
-      - name: Fix EatApplePies URLs
+      - name: Fix plugin URLs
         working-directory: upstream
         run: |
           set -euo pipefail
           EAP_JS_URL='https://raw.githubusercontent.com/kabalballa/test/plugins/v3.0.0/.js/plugins/english/eatapplepies.js'
           EAP_ICON_URL='https://raw.githubusercontent.com/kabalballa/test/plugins/v3.0.0/public/static/src/en/eatapplepies/icon.png'
+          SOUSAKU_JS_URL='https://raw.githubusercontent.com/kabalballa/test/plugins/v3.0.0/.js/plugins/english/sousaku.js'
+          SOUSAKU_ICON_URL='https://raw.githubusercontent.com/kabalballa/test/plugins/v3.0.0/public/static/src/en/sousaku/icon.svg'
           for FILE in .dist/plugins.json .dist/plugins.min.json; do
             sed -i "s#https://raw.githubusercontent.com/lnreader/lnreader-plugins/master/.js/src/plugins/english/eatapplepies.js#$EAP_JS_URL#g" "$FILE"
             sed -i "s#https://raw.githubusercontent.com/lnreader/lnreader-plugins/master/public/static/src/en/eatapplepies/icon.svg#$EAP_ICON_URL#g" "$FILE"
+            sed -i "s#https://raw.githubusercontent.com/lnreader/lnreader-plugins/master/.js/src/plugins/english/sousaku.js#$SOUSAKU_JS_URL#g" "$FILE"
+            sed -i "s#https://raw.githubusercontent.com/lnreader/lnreader-plugins/master/public/static/src/en/sousaku/icon.svg#$SOUSAKU_ICON_URL#g" "$FILE"
           done
 
       - name: Verify Azure Chronicles is absent
@@ -81,6 +93,15 @@ jobs:
           file public/static/src/en/eatapplepies/icon.png | grep -qi 'PNG image'
           grep -q 'public/static/src/en/eatapplepies/icon.png' .dist/plugins.json
 
+      - name: Verify Sousaku plugin
+        working-directory: upstream
+        run: |
+          set -euo pipefail
+          test -s .js/plugins/english/sousaku.js
+          test -s public/static/src/en/sousaku/icon.svg
+          grep -q '"id":"sousaku"' .dist/plugins.json
+          grep -q 'public/static/src/en/sousaku/icon.svg' .dist/plugins.json
+
       - name: Publish generated files
         env:
           GH_TOKEN: ${{ github.token }}
@@ -91,6 +112,6 @@ jobs:
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git checkout --orphan publish
           git rm -rf . 2>/dev/null || true
-          git add -f .js .dist public/static/src/en/eatapplepies
-          git commit -m "Build EatApplePies plugin with PNG icon"
+          git add -f .js .dist public/static/src/en/eatapplepies public/static/src/en/sousaku
+          git commit -m "Build EatApplePies and Sousaku plugins"
           git push https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git HEAD:refs/heads/plugins/v3.0.0 --force
