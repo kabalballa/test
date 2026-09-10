@@ -19,7 +19,7 @@ class Sousaku implements Plugin.PluginBase {
   name = 'Sousaku – 創作 – We Create!';
   icon = 'src/en/sousaku/icon.svg';
   site = SITE;
-  version = '1.1.2';
+  version = '1.1.3';
 
   private novelCache = new Map<string, CachedNovel>();
   private chapterContentCache = new Map<string, string>();
@@ -47,7 +47,6 @@ class Sousaku implements Plugin.PluginBase {
 
   private async catalog(): Promise<Plugin.NovelItem[]> {
     if (this.catalogCache) return this.catalogCache;
-
     const items = await Promise.all(this.knownNovels.map(async ([fallbackName, slug]) => {
       const path = new URL(`${slug}/`, this.site).href;
       try {
@@ -64,7 +63,6 @@ class Sousaku implements Plugin.PluginBase {
         return { name: fallbackName, path, cover: defaultCover };
       }
     }));
-
     this.catalogCache = items;
     return items;
   }
@@ -76,11 +74,7 @@ class Sousaku implements Plugin.PluginBase {
       const encodedTarget = requestUrl.searchParams.get('url');
       if (!encodedTarget) throw new Error('Missing external Sousaku chapter URL');
       let target: URL;
-      try {
-        target = new URL(encodedTarget);
-      } catch {
-        throw new Error('Invalid external Sousaku chapter URL');
-      }
+      try { target = new URL(encodedTarget); } catch { throw new Error('Invalid external Sousaku chapter URL'); }
       if (target.protocol !== 'https:' && target.protocol !== 'http:') {
         throw new Error(`Unsupported external Sousaku chapter protocol: ${target.protocol}`);
       }
@@ -88,7 +82,6 @@ class Sousaku implements Plugin.PluginBase {
       if (!response.ok) throw new Error(`Sousaku returned ${response.status}`);
       return response.text();
     }
-
     const response = await fetchApi(requestUrl.href);
     if (!response.ok) throw new Error(`Sousaku returned ${response.status}`);
     return response.text();
@@ -101,120 +94,92 @@ class Sousaku implements Plugin.PluginBase {
   }
 
   private normalizeNovelTitle(text: string): string {
-    return text
-      .replace(/\s+/g, ' ')
-      .replace(/\s*[–—-]\s*(?:table\s+of\s+contents|toc)\s*$/i, '')
-      .trim();
+    return text.replace(/\s+/g, ' ').replace(/\s*[–—-]\s*(?:table\s+of\s+contents|toc)\s*$/i, '').trim();
   }
 
   private extractEntryTitle($: ReturnType<typeof load>): string {
-    const entryTitle = $('.entry-content h1.entry-title, .entry-content h1, .entry-content .entry-title').first().text()
-      .replace(/\s+/g, ' ')
-      .trim();
-    const articleTitle = $('article .entry-title, article h1, main .entry-title, main h1').first().text()
-      .replace(/\s+/g, ' ')
-      .trim();
+    const entryTitle = $('.entry-content h1.entry-title, .entry-content h1, .entry-content .entry-title').first().text().replace(/\s+/g, ' ').trim();
+    const articleTitle = $('article .entry-title, article h1, main .entry-title, main h1').first().text().replace(/\s+/g, ' ').trim();
     const firstTitle = entryTitle || articleTitle;
-
     if (firstTitle) {
       const title = this.normalizeNovelTitle(firstTitle);
       if (title && !/^(sousaku|kari translates japanese novels)$/i.test(title)) return title;
     }
-
-    const explicitEnglishTitle = $('article, main, .entry-content')
-      .first()
-      .find('*')
-      .map((_, el) => $(el).text().replace(/\s+/g, ' ').trim())
-      .get()
+    const explicitEnglishTitle = $('article, main, .entry-content').first().find('*')
+      .map((_, el) => $(el).text().replace(/\s+/g, ' ').trim()).get()
       .find(text => /^english\s+title\s*:/i.test(text));
-
-    if (explicitEnglishTitle) {
-      const title = explicitEnglishTitle.replace(/^english\s+title\s*:\s*/i, '').trim();
-      if (title) return this.normalizeNovelTitle(title);
-    }
-
+    if (explicitEnglishTitle) return this.normalizeNovelTitle(explicitEnglishTitle.replace(/^english\s+title\s*:\s*/i, '').trim());
     return '';
   }
 
   private extractCover($: ReturnType<typeof load>, contentRoot: ReturnType<typeof load>): string {
-    const coverSrc = $('meta[property="og:image"]').attr('content')
-      || $('meta[name="twitter:image"]').attr('content')
-      || contentRoot.find('img').first().attr('src');
+    const coverSrc = $('meta[property="og:image"]').attr('content') || $('meta[name="twitter:image"]').attr('content') || contentRoot.find('img').first().attr('src');
     if (!coverSrc) return defaultCover;
-    try {
-      return new URL(coverSrc, this.site).href;
-    } catch {
-      return defaultCover;
-    }
+    try { return new URL(coverSrc, this.site).href; } catch { return defaultCover; }
   }
 
   private extractNovelStatus($: ReturnType<typeof load>, slug: string): Plugin.NovelStatus {
     const text = $('article, main, .entry-content').first().text().replace(/\s+/g, ' ').trim();
-
-    if (/\b(?:series|novel)\s*(?:status|state)\s*[:\-]\s*completed\b/i.test(text)) {
-      return NovelStatus.Completed;
-    }
-    if (/\b(?:series|novel)\s*(?:status|state)\s*[:\-]\s*(?:on\s+)?hiatus\b/i.test(text)) {
-      return NovelStatus.OnHiatus;
-    }
-    if (/\b(?:series|novel)\s*(?:status|state)\s*[:\-]\s*(?:cancelled|canceled)\b/i.test(text)) {
-      return NovelStatus.Cancelled;
-    }
-    if (/\b(?:series|novel)\s*(?:status|state)\s*[:\-]\s*(?:ongoing|active|in progress)\b/i.test(text)) {
-      return NovelStatus.Ongoing;
-    }
-
-    const completedSlugs = new Set([
-      'beyond-the-heros-death-table-of-contents',
-      'the-abused-merchants-daughter-table-of-contents',
-    ]);
+    if (/\b(?:series|novel)\s*(?:status|state)\s*[:\-]\s*completed\b/i.test(text)) return NovelStatus.Completed;
+    if (/\b(?:series|novel)\s*(?:status|state)\s*[:\-]\s*(?:on\s+)?hiatus\b/i.test(text)) return NovelStatus.OnHiatus;
+    if (/\b(?:series|novel)\s*(?:status|state)\s*[:\-]\s*(?:cancelled|canceled)\b/i.test(text)) return NovelStatus.Cancelled;
+    if (/\b(?:series|novel)\s*(?:status|state)\s*[:\-]\s*(?:ongoing|active|in progress)\b/i.test(text)) return NovelStatus.Ongoing;
+    const completedSlugs = new Set(['beyond-the-heros-death-table-of-contents', 'the-abused-merchants-daughter-table-of-contents']);
     if (completedSlugs.has(slug)) return NovelStatus.Completed;
-
     return NovelStatus.Unknown;
   }
 
-  private extractChapterReleaseTime(
-    $: ReturnType<typeof load>,
-    url: URL,
-    element: ReturnType<ReturnType<typeof load>>,
-  ): string | undefined {
+  private extractChapterReleaseTime($: ReturnType<typeof load>, url: URL, element: ReturnType<ReturnType<typeof load>>): string | undefined {
     const dateMatch = url.pathname.match(/\/(\d{4})\/(\d{2})\/(\d{2})(?:\/|$)/);
     if (dateMatch) return `${dateMatch[1]}-${dateMatch[2]}-${dateMatch[3]}`;
-
-    const rawDate = element.attr('datetime')
-      || element.attr('data-date')
-      || element.closest('[datetime], [data-date]').first().attr('datetime')
-      || element.closest('[datetime], [data-date]').first().attr('data-date');
+    const rawDate = element.attr('datetime') || element.attr('data-date') || element.closest('[datetime], [data-date]').first().attr('datetime') || element.closest('[datetime], [data-date]').first().attr('data-date');
     if (rawDate) {
       const parsed = new Date(rawDate);
       if (!Number.isNaN(parsed.getTime())) return parsed.toISOString();
     }
-
     return undefined;
   }
 
-  private isSpecialSectionLink($: ReturnType<typeof load>, element: ReturnType<ReturnType<typeof load>>): boolean {
-    const text = $(element).text().replace(/\s+/g, ' ').trim();
-    if (/^illustrations?\b/i.test(text) || /^manga\b/i.test(text)) return true;
+  private extractChapters($: ReturnType<typeof load>, novelPath: string, hasContentRoot: boolean): Plugin.ChapterItem[] {
+    const seen = new Set<string>();
+    const chapters: Plugin.ChapterItem[] = [];
+    const novelUrl = new URL(novelPath, this.site);
+    const contentRoot = $('.entry-content').first().length ? $('.entry-content').first() : $('article').first().length ? $('article').first() : $('main').first();
+    const root = contentRoot.length ? contentRoot : $('body');
+    let inExcludedSection = false;
+    const headingPattern = /^(?:illustrations?|manga)\s*:?[\s]*$/i;
+    const headingsAndLinks = root.find('h1, h2, h3, h4, h5, h6, a[href]');
 
-    const sectionHeading = $(element)
-      .closest('li, p, div')
-      .prevAll('h1, h2, h3, h4, h5, h6')
-      .first()
-      .text()
-      .replace(/\s+/g, ' ')
-      .trim();
-    if (/^(?:illustrations?|manga)\s*:?$/i.test(sectionHeading)) return true;
+    const process = (element: ReturnType<ReturnType<typeof load>>) => {
+      const href = element.attr('href');
+      const text = element.text().replace(/\s+/g, ' ').trim();
+      if (!href || !text) return;
+      let url: URL;
+      try { url = new URL(href, this.site); } catch { return; }
+      if (url.href.replace(/\/$/, '') === novelUrl.href.replace(/\/$/, '')) return;
+      const path = url.pathname.replace(/^\/+|\/+$/g, '');
+      const lowerPath = path.toLowerCase();
+      if (!path || seen.has(url.href) || /\.(jpg|jpeg|png|gif|webp|svg|pdf)$/i.test(path)) return;
+      if (/(?:^|[\s_-])illustrations?(?:[\s_-]|$)/i.test(`${text} ${path}`) || /(?:^|[\s_-])manga(?:[\s_-]|$)/i.test(`${text} ${path}`)) return;
+      const textLooksLikeChapter = /(?:chapter|episode|prologue|epilogue|interlude|idle\s*talk)/i.test(text) || /^\s*\d{1,4}(?:\.\d+)?\s*[-:–—]/.test(text);
+      const pathLooksLikeChapter = /(?:chapter|episode|prologue|epilogue|interlude|idle-talk)/i.test(lowerPath) || /(?:^|-)\d{1,4}(?:-|\/|$)/.test(lowerPath);
+      if (!textLooksLikeChapter && !pathLooksLikeChapter) return;
+      if (/^(category|tag|author|about|contact|discord|donate|patreon|wp-|feed|page)(\/|$)/i.test(path)) return;
+      const numberMatch = text.match(/(?:chapter|episode)\s*([0-9]+(?:\.[0-9]+)?)/i) || text.match(/^\s*(\d{1,4}(?:\.\d+)?)\s*[-:–—]/);
+      seen.add(url.href);
+      chapters.push({ name: text, path: this.toChapterPath(url), chapterNumber: numberMatch ? Number(numberMatch[1]) : undefined, releaseTime: this.extractChapterReleaseTime($, url, element) });
+    };
 
-    const ancestors = $(element).parentsUntil('.entry-content, article, main').addBack();
-    let insideSpecialSection = false;
-    ancestors.each((_, node) => {
+    headingsAndLinks.each((_, node) => {
       const tag = String(node.name || '').toLowerCase();
-      if (/^h[1-6]$/.test(tag) && /^(?:illustrations?|manga)\s*:?$/i.test($(node).text().replace(/\s+/g, ' ').trim())) {
-        insideSpecialSection = true;
+      if (/^h[1-6]$/.test(tag)) {
+        inExcludedSection = headingPattern.test($(node).text().replace(/\s+/g, ' ').trim());
+      } else if (tag === 'a' && !inExcludedSection) {
+        process($(node));
       }
     });
-    return insideSpecialSection;
+
+    return chapters;
   }
 
   async popularNovels(pageNo: number, _options?: unknown): Promise<Plugin.NovelItem[]> {
@@ -227,9 +192,7 @@ class Sousaku implements Plugin.PluginBase {
   async searchNovels(searchTerm: string, pageNo = 1): Promise<Plugin.NovelItem[]> {
     const items = await this.catalog();
     const term = searchTerm.trim().toLowerCase();
-    const matches = term
-      ? items.filter(item => item.name.toLowerCase().includes(term) || item.path.toLowerCase().includes(term))
-      : items;
+    const matches = term ? items.filter(item => item.name.toLowerCase().includes(term) || item.path.toLowerCase().includes(term)) : items;
     const start = Math.max(0, pageNo - 1) * 20;
     return matches.slice(start, start + 20);
   }
@@ -240,14 +203,7 @@ class Sousaku implements Plugin.PluginBase {
       cached = await this.fetchNovel(novelPath);
       this.novelCache.set(novelPath, cached);
     }
-    return {
-      name: cached.name,
-      path: novelPath,
-      cover: cached.cover,
-      summary: cached.summary,
-      status: cached.status,
-      chapters: cached.chapters.slice(),
-    };
+    return { name: cached.name, path: novelPath, cover: cached.cover, summary: cached.summary, status: cached.status, chapters: cached.chapters.slice() };
   }
 
   private async fetchNovel(novelPath: string): Promise<CachedNovel> {
@@ -258,75 +214,10 @@ class Sousaku implements Plugin.PluginBase {
     const cover = this.extractCover($, contentRoot);
     const slug = new URL(novelPath, this.site).pathname.replace(/^\/+|\/+$/g, '');
     const status = this.extractNovelStatus($, slug);
-
     const paragraphs = contentRoot.find('p').map((_, el) => $(el).text().replace(/\s+/g, ' ').trim()).get().filter(Boolean);
     const summary = paragraphs.slice(0, 4).join('\n\n') || 'Chapters published by Sousaku.';
     const chapters = this.extractChapters($, novelPath, contentRoot.length > 0);
     return { name, cover, summary, status, chapters };
-  }
-
-  private extractChapters($: ReturnType<typeof load>, novelPath: string, hasContentRoot: boolean): Plugin.ChapterItem[] {
-    const seen = new Set<string>();
-    const chapters: Plugin.ChapterItem[] = [];
-    const novelUrl = new URL(novelPath, this.site);
-
-    let links = $('.entry-content a[href], article a[href], main a[href]');
-    if (!links.length || !hasContentRoot) links = $('a[href]');
-
-    links.each((_, element) => {
-      const href = $(element).attr('href');
-      const text = $(element).text().replace(/\s+/g, ' ').trim();
-      if (!href || !text || this.isSpecialSectionLink($, $(element))) return;
-
-      let url: URL;
-      try { url = new URL(href, this.site); } catch { return; }
-      if (url.href.replace(/\/$/, '') === novelUrl.href.replace(/\/$/, '')) return;
-
-      const path = url.pathname.replace(/^\/+|\/+$/g, '');
-      const lowerPath = path.toLowerCase();
-      if (!path || seen.has(url.href) || /\.(jpg|jpeg|png|gif|webp|svg|pdf)$/i.test(path)) return;
-      if (/(?:^|[\s_-])illustrations?(?:[\s_-]|$)/i.test(`${text} ${path}`) || /(?:^|[\s_-])manga(?:[\s_-]|$)/i.test(`${text} ${path}`)) return;
-
-      const textLooksLikeChapter = /(?:chapter|episode|prologue|epilogue|interlude|idle\s*talk)/i.test(text)
-        || /^\s*\d{1,4}(?:\.\d+)?\s*[-:–—]/.test(text);
-      const pathLooksLikeChapter = /(?:chapter|episode|prologue|epilogue|interlude|idle-talk)/i.test(lowerPath)
-        || /(?:^|-)\d{1,4}(?:-|\/|$)/.test(lowerPath);
-
-      if (!textLooksLikeChapter && !pathLooksLikeChapter) return;
-      if (/^(category|tag|author|about|contact|discord|donate|patreon|wp-|feed|page)(\/|$)/i.test(path)) return;
-
-      const numberMatch = text.match(/(?:chapter|episode)\s*([0-9]+(?:\.[0-9]+)?)/i)
-        || text.match(/^\s*(\d{1,4}(?:\.\d+)?)\s*[-:–—]/);
-      seen.add(url.href);
-      chapters.push({
-        name: text,
-        path: this.toChapterPath(url),
-        chapterNumber: numberMatch ? Number(numberMatch[1]) : undefined,
-        releaseTime: this.extractChapterReleaseTime($, url, $(element)),
-      });
-    });
-
-    if (!chapters.length && links.length) {
-      $('a[href]').each((_, element) => {
-        const href = $(element).attr('href');
-        const text = $(element).text().replace(/\s+/g, ' ').trim();
-        if (!href || !text || this.isSpecialSectionLink($, $(element)) || /(?:^|[\s_-])illustrations?(?:[\s_-]|$)/i.test(`${text} ${href}`) || /(?:^|[\s_-])manga(?:[\s_-]|$)/i.test(`${text} ${href}`) || !/(?:chapter|episode|prologue|epilogue|interlude|idle\s*talk)/i.test(text)) return;
-        let url: URL;
-        try { url = new URL(href, this.site); } catch { return; }
-        if (url.href.replace(/\/$/, '') === novelUrl.href.replace(/\/$/, '')) return;
-        if (seen.has(url.href)) return;
-        seen.add(url.href);
-        const numberMatch = text.match(/(?:chapter|episode)\s*([0-9]+(?:\.[0-9]+)?)/i);
-        chapters.push({
-          name: text,
-          path: this.toChapterPath(url),
-          chapterNumber: numberMatch ? Number(numberMatch[1]) : undefined,
-          releaseTime: this.extractChapterReleaseTime($, url, $(element)),
-        });
-      });
-    }
-
-    return chapters;
   }
 
   async parseChapter(chapterPath: string): Promise<string> {
