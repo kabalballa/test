@@ -21,7 +21,7 @@ class Sousaku implements Plugin.PluginBase {
   name = 'Sousaku – 創作 – We Create!';
   icon = 'src/en/sousaku/icon.svg';
   site = SITE;
-  version = '1.1.9';
+  version = '1.2.0';
 
   private novelCache = new Map<string, CachedNovel>();
   private chapterContentCache = new Map<string, string>();
@@ -204,7 +204,7 @@ class Sousaku implements Plugin.PluginBase {
       if (!textLooksLikeChapter && !pathLooksLikeChapter) return;
       if (/^(category|tag|author|about|contact|discord|donate|patreon|wp-|feed|page)(\/|$)/i.test(path)) return;
 
-      const identity = `${cleanBase.href.replace(/\/$/, '')}::${this.normalizeChapterLabel(text)}`;
+      const identity = `${cleanBase.href.replace(/\/$/, '')}::${this.normalizeChapterLabel(text)}::${originalFragment}`;
       if (seen.has(identity)) return;
       seen.add(identity);
 
@@ -216,7 +216,6 @@ class Sousaku implements Plugin.PluginBase {
         releaseTime: this.extractChapterReleaseTime($, cleanBase, element),
       });
 
-      // Preserve the original anchor by replacing the wrapper target's fragment after construction.
       const chapter = chapters[chapters.length - 1];
       if (chapter && originalFragment) {
         const wrapper = new URL(chapter.path, this.site);
@@ -243,12 +242,45 @@ class Sousaku implements Plugin.PluginBase {
       const id = decodeURIComponent(fragment.replace(/^#/, ''));
       const escaped = id.replace(/([\\.#:[\],>+~*])/g, '\\$1');
       const target = root.find(`#${escaped}`).first();
-      if (target.length) return target;
+      if (target.length) {
+        const targetText = target.text().replace(/[\u200b\u200c\u200d\ufeff]/g, '').replace(/\s+/g, ' ').trim();
+        const targetTag = String(target[0]?.name || '').toLowerCase();
+        if (/^h[1-6]$/.test(targetTag) || this.isChapterMarkerText(targetText)) return target;
+
+        const parent = target.parent();
+        if (parent.length) {
+          const parentText = parent.text().replace(/[\u200b\u200c\u200d\ufeff]/g, '').replace(/\s+/g, ' ').trim();
+          const parentTag = String(parent[0]?.name || '').toLowerCase();
+          if (/^h[1-6]$/.test(parentTag) || this.isChapterMarkerText(parentText)) return parent;
+        }
+
+        let current = target.next();
+        while (current.length) {
+          const currentTag = String(current[0]?.name || '').toLowerCase();
+          const currentText = current.text().replace(/[\u200b\u200c\u200d\ufeff]/g, '').replace(/\s+/g, ' ').trim();
+          if (/^h[1-6]$/.test(currentTag) || this.isChapterMarkerText(currentText)) return current;
+          current = current.next();
+        }
+      }
+
       const named = root.find(`[name="${id.replace(/"/g, '\\"')}"]`).first();
-      if (named.length) return named;
+      if (named.length) {
+        const namedText = named.text().replace(/[\u200b\u200c\u200d\ufeff]/g, '').replace(/\s+/g, ' ').trim();
+        const namedTag = String(named[0]?.name || '').toLowerCase();
+        if (/^h[1-6]$/.test(namedTag) || this.isChapterMarkerText(namedText)) return named;
+        let current = named.next();
+        while (current.length) {
+          const currentTag = String(current[0]?.name || '').toLowerCase();
+          const currentText = current.text().replace(/[\u200b\u200c\u200d\ufeff]/g, '').replace(/\s+/g, ' ').trim();
+          if (/^h[1-6]$/.test(currentTag) || this.isChapterMarkerText(currentText)) return current;
+          current = current.next();
+        }
+      }
     }
 
     const normalized = this.normalizeChapterLabel(requestedLabel);
+    if (!normalized) return root.find('__no_such_chapter_marker__').first();
+
     return root.find('h1, h2, h3, h4, h5, h6, p, div, li, strong, b, span').filter((_, element) => {
       const text = $(element).text().replace(/[\u200b\u200c\u200d\ufeff]/g, '').replace(/\s+/g, ' ').trim();
       const value = this.normalizeChapterLabel(text);
@@ -263,7 +295,7 @@ class Sousaku implements Plugin.PluginBase {
 
   private getChapterBlock(marker: ReturnType<ReturnType<typeof load>>): ReturnType<ReturnType<typeof load>> {
     const tag = String(marker[0]?.name || '').toLowerCase();
-    if (/^(strong|b|span)$/.test(tag)) {
+    if (/^(strong|b|span|a)$/.test(tag)) {
       const parent = marker.parent();
       if (parent.length) return parent;
     }
@@ -389,7 +421,6 @@ class Sousaku implements Plugin.PluginBase {
       result = this.extractRequestedChapter($, element, requestedLabel, fragment);
     }
 
-    // Never silently return the complete shared post when a chapter-specific target was supplied.
     if ((fragment || requestedLabel) && !result) {
       result = '<p>Requested chapter could not be isolated.</p>';
     }
