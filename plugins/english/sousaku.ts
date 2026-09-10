@@ -17,14 +17,11 @@ class Sousaku implements Plugin.PluginBase {
   name = 'Sousaku – 創作 – We Create!';
   icon = 'src/en/sousaku/icon.svg';
   site = SITE;
-  version = '1.0.7';
+  version = '1.0.8';
 
   private novelCache = new Map<string, CachedNovel>();
   private chapterContentCache = new Map<string, string>();
 
-  // Keep source listing completely local. This prevents the LNReader source
-  // screen from depending on a homepage request that may fail in the app's
-  // networking environment.
   private readonly knownNovels = [
     ['Moto Sekai Ichi Table of Contents', 'motto-sekai-ichi-i-no-sub-chara-ikusei-nikki'],
     ['Labyrinth Renovation – Table of contents', 'labyrinth-renovation-table-of-contents'],
@@ -108,32 +105,53 @@ class Sousaku implements Plugin.PluginBase {
   }
 
   private extractChapters($: ReturnType<typeof load>, novelPath: string): Plugin.ChapterItem[] {
-    const content = $('.entry-content').first();
     const seen = new Set<string>();
     const chapters: Plugin.ChapterItem[] = [];
-    const novelUrl = new URL(novelPath, this.site).href.replace(/\/$/, '');
+    const novelUrl = new URL(novelPath, this.site);
+    const novelPathname = novelUrl.pathname.replace(/^\/+|\/+$/g, '');
+    const novelSlug = novelPathname
+      .replace(/-table-of-contents$/, '')
+      .replace(/-toc$/, '');
+    const siteOrigin = new URL(this.site).origin;
 
-    content('a[href]').each((_, element) => {
-      const href = content(element).attr('href');
-      const text = content(element).text().replace(/\s+/g, ' ').trim();
+    // Sousaku's ToC pages contain chapter links in the article, but their
+    // markup varies between older and newer posts. Search article/main links
+    // first and fall back to all same-site links if the theme omits those
+    // containers from the parsed HTML.
+    let links = $('.entry-content a[href], article a[href], main a[href]');
+    if (!links.length) links = $('a[href]');
+
+    links.each((_, element) => {
+      const href = $(element).attr('href');
+      const text = $(element).text().replace(/\s+/g, ' ').trim();
       if (!href || !text) return;
+
       let url: URL;
       try { url = new URL(href, this.site); } catch { return; }
-      if (url.origin !== new URL(this.site).origin || url.href.replace(/\/$/, '') === novelUrl) return;
+      if (url.origin !== siteOrigin) return;
+      if (url.href.replace(/\/$/, '') === novelUrl.href.replace(/\/$/, '')) return;
 
       const path = url.pathname.replace(/^\/+|\/+$/g, '');
-      if (!path || seen.has(path) || /\.(jpg|jpeg|png|gif|webp|svg|pdf)$/i.test(path)) return;
+      if (!path || seen.has(url.href) || /\.(jpg|jpeg|png|gif|webp|svg|pdf)$/i.test(path)) return;
       if (/^(category|tag|author|about|contact|discord|donate|patreon)(\/|$)/i.test(path)) return;
 
-      const chapterLike = /(?:chapter|episode|prologue|epilogue|idle talk)/i.test(text)
-        || /^\s*\d{3,4}\s*[-:]/.test(text)
-        || /\/(?:chapter|episode)[-\d]/i.test(path)
-        || /^\d{4}\//.test(path);
-      if (!chapterLike) return;
+      // TOC links generally use the novel slug in their path (for example
+      // /labyrinth-renovation-001/), while newer posts use dated paths such
+      // as /2025/12/12/labyrinth-renovation-chapter-50/. Accept both forms.
+      const pathLooksLikeThisNovel = novelSlug && path.toLowerCase().includes(novelSlug.toLowerCase());
+      const textLooksLikeChapter = /(?:chapter|episode|prologue|epilogue|idle talk)/i.test(text)
+        || /^\s*\d{1,4}(?:\.\d+)?\s*[-:]/.test(text);
+      const pathLooksLikeChapter = /(?:chapter|episode|prologue|epilogue|idle-talk|(?:^|-)\d{3,4}(?:-|\/|$))/i.test(path);
+      if (!pathLooksLikeThisNovel && !(textLooksLikeChapter && pathLooksLikeChapter)) return;
 
-      const numberMatch = text.match(/(?:chapter|episode)\s*([0-9]+(?:\.[0-9]+)?)/i) || text.match(/^\s*(\d{1,4})\s*[-:]/);
-      seen.add(path);
-      chapters.push({ name: text, path: url.href, chapterNumber: numberMatch ? Number(numberMatch[1]) : undefined });
+      const numberMatch = text.match(/(?:chapter|episode)\s*([0-9]+(?:\.[0-9]+)?)/i)
+        || text.match(/^\s*(\d{1,4}(?:\.\d+)?)\s*[-:]/);
+      seen.add(url.href);
+      chapters.push({
+        name: text,
+        path: url.href,
+        chapterNumber: numberMatch ? Number(numberMatch[1]) : undefined,
+      });
     });
 
     return chapters;
