@@ -21,7 +21,7 @@ class Sousaku implements Plugin.PluginBase {
   name = 'Sousaku – 創作 – We Create!';
   icon = 'src/en/sousaku/icon.svg';
   site = SITE;
-  version = '1.1.5';
+  version = '1.1.7';
 
   private novelCache = new Map<string, CachedNovel>();
   private chapterContentCache = new Map<string, string>();
@@ -81,6 +81,7 @@ class Sousaku implements Plugin.PluginBase {
         throw new Error(`Unsupported Sousaku chapter protocol: ${target.protocol}`);
       }
       target.searchParams.delete(CHAPTER_MARKER);
+      target.hash = '';
       const response = await fetchApi(target.href);
       if (!response.ok) throw new Error(`Sousaku returned ${response.status}`);
       return response.text();
@@ -162,7 +163,7 @@ class Sousaku implements Plugin.PluginBase {
   }
 
   private extractChapters($: ReturnType<typeof load>, novelPath: string, _hasContentRoot: boolean): Plugin.ChapterItem[] {
-    const seen = new Set<string>();
+    const seenLabels = new Set<string>();
     const chapters: Plugin.ChapterItem[] = [];
     const novelUrl = new URL(novelPath, this.site);
     const contentRoot = $('.entry-content').first().length ? $('.entry-content').first() : $('article').first().length ? $('article').first() : $('main').first();
@@ -171,74 +172,88 @@ class Sousaku implements Plugin.PluginBase {
     const headingPattern = /^(?:illustrations?|manga)\s*:?\s*$/i;
     const headingsAndLinks = root.find('h1, h2, h3, h4, h5, h6, a[href]');
 
-    const process = (element: ReturnType<ReturnType<typeof load>>) => {
+    headingsAndLinks.each((_, node) => {
+      const tag = String(node.name || '').toLowerCase();
+      const element = $(node);
+      const headingText = element.text().replace(/\s+/g, ' ').trim();
+      if (/^h[1-6]$/.test(tag)) {
+        inExcludedSection = headingPattern.test(headingText);
+        return;
+      }
+      if (tag !== 'a' || inExcludedSection) return;
+
       const href = element.attr('href');
-      const text = element.text().replace(/\s+/g, ' ').trim();
+      const text = headingText;
       if (!href || !text) return;
       let url: URL;
       try { url = new URL(href, this.site); } catch { return; }
+
       const cleanHrefUrl = new URL(url.href);
       cleanHrefUrl.hash = '';
       cleanHrefUrl.searchParams.delete(CHAPTER_MARKER);
+      cleanHrefUrl.hash = '';
       if (cleanHrefUrl.href.replace(/\/$/, '') === novelUrl.href.replace(/\/$/, '')) return;
+
       const path = cleanHrefUrl.pathname.replace(/^\/+|\/+$/g, '');
       const lowerPath = path.toLowerCase();
       if (!path || /\.(jpg|jpeg|png|gif|webp|svg|pdf)$/i.test(path)) return;
       if (/(?:^|[\s_-])illustrations?(?:[\s_-]|$)/i.test(`${text} ${path}`) || /(?:^|[\s_-])manga(?:[\s_-]|$)/i.test(`${text} ${path}`)) return;
+
       const textLooksLikeChapter = /(?:chapter|episode|prologue|epilogue|interlude|idle\s*talk)/i.test(text) || /^\s*\d{1,4}(?:\.\d+)?\s*[-:–—]/.test(text);
       const pathLooksLikeChapter = /(?:chapter|episode|prologue|epilogue|interlude|idle-talk)/i.test(lowerPath) || /(?:^|-)\d{1,4}(?:-|\/|$)/.test(lowerPath);
       if (!textLooksLikeChapter && !pathLooksLikeChapter) return;
       if (/^(category|tag|author|about|contact|discord|donate|patreon|wp-|feed|page)(\/|$)/i.test(path)) return;
+
+      const labelKey = this.normalizeChapterLabel(text);
+      if (!labelKey || seenLabels.has(labelKey)) return;
+      seenLabels.add(labelKey);
+
       const numberMatch = text.match(/(?:chapter|episode)\s*([0-9]+(?:\.[0-9]+)?)/i) || text.match(/^\s*(\d{1,4}(?:\.\d+)?)\s*[-:–—]/);
-      const identity = `${cleanHrefUrl.href.replace(/\/$/, '')}::${this.normalizeChapterLabel(text)}`;
-      if (seen.has(identity)) return;
-      seen.add(identity);
       chapters.push({
         name: text,
         path: this.toChapterPath(cleanHrefUrl, text),
         chapterNumber: numberMatch ? Number(numberMatch[1]) : undefined,
         releaseTime: this.extractChapterReleaseTime($, cleanHrefUrl, element),
       });
-    };
-
-    headingsAndLinks.each((_, node) => {
-      const tag = String(node.name || '').toLowerCase();
-      if (/^h[1-6]$/.test(tag)) {
-        inExcludedSection = headingPattern.test($(node).text().replace(/\s+/g, ' ').trim());
-      } else if (tag === 'a' && !inExcludedSection) {
-        process($(node));
-      }
     });
 
     return chapters;
   }
 
-  private findChapterHeading($: ReturnType<typeof load>, root: ReturnType<ReturnType<typeof load>>, requestedLabel: string): ReturnType<typeof load> {
+  private isChapterMarkerText(text: string): boolean {
+    return /^(?:chapter\s+|episode\s+|prologue\b|epilogue\b|interlude\b|idle\s*talk\b)/i.test(text.trim());
+  }
+
+  private findChapterMarker($: ReturnType<typeof load>, root: ReturnType<ReturnType<typeof load>>, requestedLabel: string): ReturnType<typeof load> {
     const normalized = this.normalizeChapterLabel(requestedLabel);
-    return root.find('h1, h2, h3, h4, h5, h6').filter((_, element) => {
-      const heading = this.normalizeChapterLabel($(element).text());
-      if (heading === normalized) return true;
-      return heading.startsWith(`${normalized}:`) || heading.startsWith(`${normalized} –`) || heading.startsWith(`${normalized} -`) || heading.startsWith(`${normalized} —`);
+    return root.find('h1, h2, h3, h4, h5, h6, p, div, li').filter((_, element) => {
+      const text = $(element).text().replace(/\s+/g, ' ').trim();
+      const value = this.normalizeChapterLabel(text);
+      if (!value || !this.isChapterMarkerText(text)) return false;
+      if (value === normalized) return true;
+      return value.startsWith(`${normalized}:`) || value.startsWith(`${normalized} -`) || value.startsWith(`${normalized} –`) || value.startsWith(`${normalized} —`);
     }).first();
   }
 
   private extractRequestedChapter($: ReturnType<typeof load>, root: ReturnType<ReturnType<typeof load>>, requestedLabel: string): string {
-    const marker = this.findChapterHeading($, root, requestedLabel);
+    const marker = this.findChapterMarker($, root, requestedLabel);
     if (!marker.length) return '';
 
-    const tag = String(marker[0]?.name || '').toLowerCase();
-    if (!/^h[1-6]$/.test(tag)) return '';
-
-    const level = Number(tag.slice(1));
+    const markerText = marker.text().replace(/\s+/g, ' ').trim();
     const result: string[] = [];
     let current = marker.next();
+
     while (current.length) {
-      const currentTag = String(current[0]?.name || '').toLowerCase();
-      if (/^h[1-6]$/.test(currentTag) && Number(currentTag.slice(1)) <= level) break;
+      const currentText = current.text().replace(/\s+/g, ' ').trim();
+      if (currentText && this.isChapterMarkerText(currentText)) break;
+      if (/^h[1-6]$/i.test(String(current[0]?.name || ''))) break;
       result.push($.html(current) || '');
       current = current.next();
     }
-    return result.filter(Boolean).join('').trim();
+
+    const output = result.filter(Boolean).join('').trim();
+    if (!output) return '';
+    return output;
   }
 
   async popularNovels(pageNo: number, _options?: unknown): Promise<Plugin.NovelItem[]> {
