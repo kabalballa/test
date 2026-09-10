@@ -80,6 +80,7 @@ class Sousaku implements Plugin.PluginBase {
       if (target.protocol !== 'https:' && target.protocol !== 'http:') {
         throw new Error(`Unsupported external Sousaku chapter protocol: ${target.protocol}`);
       }
+      target.searchParams.delete(CHAPTER_MARKER);
       const response = await fetchApi(target.href);
       if (!response.ok) throw new Error(`Sousaku returned ${response.status}`);
       return response.text();
@@ -207,7 +208,7 @@ class Sousaku implements Plugin.PluginBase {
     return chapters;
   }
 
-  private findChapterHeading($: ReturnType<typeof load>, root: ReturnType<ReturnType<typeof load>>, requestedLabel: string): ReturnType<typeof load> {
+  private findChapterHeading(root: ReturnType<ReturnType<typeof load>>, requestedLabel: string): ReturnType<typeof load> {
     const normalized = this.normalizeChapterLabel(requestedLabel);
     let match = root.find('h1, h2, h3, h4, h5, h6').filter((_, element) => {
       const heading = this.normalizeChapterLabel($(element).text());
@@ -223,33 +224,31 @@ class Sousaku implements Plugin.PluginBase {
   }
 
   private extractRequestedChapter($: ReturnType<typeof load>, root: ReturnType<ReturnType<typeof load>>, requestedLabel: string): string {
-    const heading = this.findChapterHeading($, root, requestedLabel);
-    if (!heading.length) return '';
+    const marker = this.findChapterHeading(root, requestedLabel);
+    if (!marker.length) return '';
 
-    const tag = String(heading[0]?.name || '').toLowerCase();
-    const isHeading = /^h[1-6]$/.test(tag);
-    if (!isHeading) {
-      const headingText = heading.text().replace(/\s+/g, ' ').trim();
-      const clone = heading.clone();
-      clone.remove();
-      const result: string[] = [];
-      result.push(`<p>${headingText}</p>`);
-      let current = clone.parent().children().eq(clone.index() + 1);
+    const tag = String(marker[0]?.name || '').toLowerCase();
+    if (!/^h[1-6]$/.test(tag)) {
+      const parent = marker.parent();
+      if (!parent.length) return $.html(marker) || '';
+      const result: string[] = [$.html(marker) || ''];
+      let current = parent.children().eq(marker.index() + 1);
       while (current.length) {
-        if (/^h[1-6]$/.test(String(current[0]?.name || '').toLowerCase())) break;
-        result.push($.html(current));
+        const currentTag = String(current[0]?.name || '').toLowerCase();
+        if (/^h[1-6]$/.test(currentTag)) break;
+        result.push($.html(current) || '');
         current = current.next();
       }
-      return result.join('');
+      return result.filter(Boolean).join('');
     }
 
     const level = Number(tag.slice(1));
     const result: string[] = [];
-    let current = heading;
+    let current = marker;
     while (current.length) {
       const currentTag = String(current[0]?.name || '').toLowerCase();
-      if (current !== heading && /^h[1-6]$/.test(currentTag) && Number(currentTag.slice(1)) <= level) break;
-      if (current !== heading || requestedLabel.trim()) result.push($.html(current));
+      if (current !== marker && /^h[1-6]$/.test(currentTag) && Number(currentTag.slice(1)) <= level) break;
+      result.push($.html(current) || '');
       current = current.next();
     }
     return result.filter(Boolean).join('');
