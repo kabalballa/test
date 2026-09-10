@@ -5,6 +5,7 @@ import { Plugin } from '@/types/plugin';
 import { defaultCover } from '@libs/defaultCover';
 
 const SITE = 'https://sousaku.blog/';
+const CHAPTER_MARKER = '__sousaku_chapter';
 
 type CachedNovel = {
   name: string;
@@ -19,10 +20,11 @@ class Sousaku implements Plugin.PluginBase {
   name = 'Sousaku – 創作 – We Create!';
   icon = 'src/en/sousaku/icon.svg';
   site = SITE;
-  version = '1.1.3';
+  version = '1.1.4';
 
   private novelCache = new Map<string, CachedNovel>();
   private chapterContentCache = new Map<string, string>();
+  private chapterPageCache = new Map<string, string>();
   private catalogCache: Plugin.NovelItem[] | null = null;
 
   private readonly knownNovels = [
@@ -82,19 +84,35 @@ class Sousaku implements Plugin.PluginBase {
       if (!response.ok) throw new Error(`Sousaku returned ${response.status}`);
       return response.text();
     }
+    requestUrl.searchParams.delete(CHAPTER_MARKER);
     const response = await fetchApi(requestUrl.href);
     if (!response.ok) throw new Error(`Sousaku returned ${response.status}`);
     return response.text();
   }
 
-  private toChapterPath(url: URL): string {
+  private toChapterPath(url: URL, chapterName: string): string {
     const siteOrigin = new URL(this.site).origin;
-    if (url.origin === siteOrigin) return url.href;
-    return new URL(`/__external_chapter__/?url=${encodeURIComponent(url.href)}`, this.site).href;
+    if (url.origin === siteOrigin) {
+      const chapterUrl = new URL(url.href);
+      chapterUrl.searchParams.set(CHAPTER_MARKER, chapterName);
+      return chapterUrl.href;
+    }
+    return new URL(`/__external_chapter__/?url=${encodeURIComponent(url.href)}&${CHAPTER_MARKER}=${encodeURIComponent(chapterName)}`, this.site).href;
   }
 
   private normalizeNovelTitle(text: string): string {
     return text.replace(/\s+/g, ' ').replace(/\s*[–—-]\s*(?:table\s+of\s+contents|toc)\s*$/i, '').trim();
+  }
+
+  private normalizeChapterLabel(text: string): string {
+    return text
+      .replace(/[’‘]/g, "'")
+      .replace(/[“”]/g, '"')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .toLowerCase()
+      .replace(/^chapter\s+/, '')
+      .replace(/^episode\s+/, '');
   }
 
   private extractEntryTitle($: ReturnType<typeof load>): string {
@@ -140,14 +158,14 @@ class Sousaku implements Plugin.PluginBase {
     return undefined;
   }
 
-  private extractChapters($: ReturnType<typeof load>, novelPath: string, hasContentRoot: boolean): Plugin.ChapterItem[] {
+  private extractChapters($: ReturnType<typeof load>, novelPath: string, _hasContentRoot: boolean): Plugin.ChapterItem[] {
     const seen = new Set<string>();
     const chapters: Plugin.ChapterItem[] = [];
     const novelUrl = new URL(novelPath, this.site);
     const contentRoot = $('.entry-content').first().length ? $('.entry-content').first() : $('article').first().length ? $('article').first() : $('main').first();
     const root = contentRoot.length ? contentRoot : $('body');
     let inExcludedSection = false;
-    const headingPattern = /^(?:illustrations?|manga)\s*:?[\s]*$/i;
+    const headingPattern = /^(?:illustrations?|manga)\s*:?\s*$/i;
     const headingsAndLinks = root.find('h1, h2, h3, h4, h5, h6, a[href]');
 
     const process = (element: ReturnType<ReturnType<typeof load>>) => {
@@ -159,15 +177,22 @@ class Sousaku implements Plugin.PluginBase {
       if (url.href.replace(/\/$/, '') === novelUrl.href.replace(/\/$/, '')) return;
       const path = url.pathname.replace(/^\/+|\/+$/g, '');
       const lowerPath = path.toLowerCase();
-      if (!path || seen.has(url.href) || /\.(jpg|jpeg|png|gif|webp|svg|pdf)$/i.test(path)) return;
+      if (!path || /\.(jpg|jpeg|png|gif|webp|svg|pdf)$/i.test(path)) return;
       if (/(?:^|[\s_-])illustrations?(?:[\s_-]|$)/i.test(`${text} ${path}`) || /(?:^|[\s_-])manga(?:[\s_-]|$)/i.test(`${text} ${path}`)) return;
       const textLooksLikeChapter = /(?:chapter|episode|prologue|epilogue|interlude|idle\s*talk)/i.test(text) || /^\s*\d{1,4}(?:\.\d+)?\s*[-:–—]/.test(text);
       const pathLooksLikeChapter = /(?:chapter|episode|prologue|epilogue|interlude|idle-talk)/i.test(lowerPath) || /(?:^|-)\d{1,4}(?:-|\/|$)/.test(lowerPath);
       if (!textLooksLikeChapter && !pathLooksLikeChapter) return;
       if (/^(category|tag|author|about|contact|discord|donate|patreon|wp-|feed|page)(\/|$)/i.test(path)) return;
       const numberMatch = text.match(/(?:chapter|episode)\s*([0-9]+(?:\.[0-9]+)?)/i) || text.match(/^\s*(\d{1,4}(?:\.\d+)?)\s*[-:–—]/);
-      seen.add(url.href);
-      chapters.push({ name: text, path: this.toChapterPath(url), chapterNumber: numberMatch ? Number(numberMatch[1]) : undefined, releaseTime: this.extractChapterReleaseTime($, url, element) });
+      const identity = `${url.href}::${this.normalizeChapterLabel(text)}`;
+      if (seen.has(identity)) return;
+      seen.add(identity);
+      chapters.push({
+        name: text,
+        path: this.toChapterPath(url, text),
+        chapterNumber: numberMatch ? Number(numberMatch[1]) : undefined,
+        releaseTime: this.extractChapterReleaseTime($, url, element),
+      });
     };
 
     headingsAndLinks.each((_, node) => {
@@ -180,6 +205,54 @@ class Sousaku implements Plugin.PluginBase {
     });
 
     return chapters;
+  }
+
+  private findChapterHeading($: ReturnType<typeof load>, root: ReturnType<ReturnType<typeof load>>, requestedLabel: string): ReturnType<typeof load> {
+    const normalized = this.normalizeChapterLabel(requestedLabel);
+    let match = root.find('h1, h2, h3, h4, h5, h6').filter((_, element) => {
+      const heading = this.normalizeChapterLabel($(element).text());
+      return heading === normalized || heading.includes(normalized) || normalized.includes(heading);
+    }).first();
+    if (match.length) return match;
+
+    match = root.find('p, div, li, strong, b').filter((_, element) => {
+      const text = this.normalizeChapterLabel($(element).text());
+      return text === normalized;
+    }).first();
+    return match;
+  }
+
+  private extractRequestedChapter($: ReturnType<typeof load>, root: ReturnType<ReturnType<typeof load>>, requestedLabel: string): string {
+    const heading = this.findChapterHeading($, root, requestedLabel);
+    if (!heading.length) return '';
+
+    const tag = String(heading[0]?.name || '').toLowerCase();
+    const isHeading = /^h[1-6]$/.test(tag);
+    if (!isHeading) {
+      const headingText = heading.text().replace(/\s+/g, ' ').trim();
+      const clone = heading.clone();
+      clone.remove();
+      const result: string[] = [];
+      result.push(`<p>${headingText}</p>`);
+      let current = clone.parent().children().eq(clone.index() + 1);
+      while (current.length) {
+        if (/^h[1-6]$/.test(String(current[0]?.name || '').toLowerCase())) break;
+        result.push($.html(current));
+        current = current.next();
+      }
+      return result.join('');
+    }
+
+    const level = Number(tag.slice(1));
+    const result: string[] = [];
+    let current = heading;
+    while (current.length) {
+      const currentTag = String(current[0]?.name || '').toLowerCase();
+      if (current !== heading && /^h[1-6]$/.test(currentTag) && Number(currentTag.slice(1)) <= level) break;
+      if (current !== heading || requestedLabel.trim()) result.push($.html(current));
+      current = current.next();
+    }
+    return result.filter(Boolean).join('');
   }
 
   async popularNovels(pageNo: number, _options?: unknown): Promise<Plugin.NovelItem[]> {
@@ -220,14 +293,47 @@ class Sousaku implements Plugin.PluginBase {
     return { name, cover, summary, status, chapters };
   }
 
+  private async fetchChapterPage(cleanUrl: string): Promise<string> {
+    const cached = this.chapterPageCache.get(cleanUrl);
+    if (cached) return cached;
+    const html = await this.getHtml(cleanUrl);
+    this.chapterPageCache.set(cleanUrl, html);
+    return html;
+  }
+
   async parseChapter(chapterPath: string): Promise<string> {
     const cached = this.chapterContentCache.get(chapterPath);
     if (cached) return cached;
-    const $ = load(await this.getHtml(chapterPath));
+
+    const requestUrl = new URL(chapterPath, this.site);
+    const requestedLabel = requestUrl.searchParams.get(CHAPTER_MARKER) || '';
+    let cleanUrl: string;
+
+    if (requestUrl.pathname === '/__external_chapter__/' && requestUrl.searchParams.has('url')) {
+      const encodedTarget = requestUrl.searchParams.get('url');
+      if (!encodedTarget) return '<p>Chapter content could not be found.</p>';
+      try {
+        const target = new URL(encodedTarget);
+        target.searchParams.delete(CHAPTER_MARKER);
+        cleanUrl = target.href;
+      } catch {
+        return '<p>Chapter content could not be found.</p>';
+      }
+    } else {
+      requestUrl.searchParams.delete(CHAPTER_MARKER);
+      cleanUrl = requestUrl.href;
+    }
+
+    const $ = load(await this.fetchChapterPage(cleanUrl));
     const element = $('.entry-content').first();
     if (!element.length) return '<p>Chapter content could not be found.</p>';
     element.find('script, style, nav, header, footer, form, .sharedaddy, .jp-relatedposts, .comments-area').remove();
-    const result = element.html()?.trim() || '<p>Chapter content could not be found.</p>';
+
+    let result = '';
+    if (requestedLabel) result = this.extractRequestedChapter($, element, requestedLabel);
+    if (!result) result = element.html()?.trim() || '';
+    if (!result) result = '<p>Chapter content could not be found.</p>';
+
     this.chapterContentCache.set(chapterPath, result);
     return result;
   }
