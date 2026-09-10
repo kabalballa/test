@@ -17,10 +17,11 @@ class Sousaku implements Plugin.PluginBase {
   name = 'Sousaku – 創作 – We Create!';
   icon = 'src/en/sousaku/icon.svg';
   site = SITE;
-  version = '1.0.11';
+  version = '1.0.12';
 
   private novelCache = new Map<string, CachedNovel>();
   private chapterContentCache = new Map<string, string>();
+  private catalogCache: Plugin.NovelItem[] | null = null;
 
   private readonly knownNovels = [
     ['Moto Sekai Ichi Table of Contents', 'motto-sekai-ichi-i-no-sub-chara-ikusei-nikki'],
@@ -42,12 +43,28 @@ class Sousaku implements Plugin.PluginBase {
     ['Isekai wo Seigyo Mahou de Kirihirake!', 'isekai-wo-seigyo-mahou-de-kirihirake'],
   ] as const;
 
-  private catalog(): Plugin.NovelItem[] {
-    return this.knownNovels.map(([name, slug]) => ({
-      name,
-      path: new URL(`${slug}/`, this.site).href,
-      cover: defaultCover,
+  private async catalog(): Promise<Plugin.NovelItem[]> {
+    if (this.catalogCache) return this.catalogCache;
+
+    const items = await Promise.all(this.knownNovels.map(async ([fallbackName, slug]) => {
+      const path = new URL(`${slug}/`, this.site).href;
+      try {
+        const $ = load(await this.getHtml(path));
+        const contentRoot = $('.entry-content').first().length
+          ? $('.entry-content').first()
+          : $('article').first().length
+            ? $('article').first()
+            : $('main').first();
+        const name = this.extractEntryTitle($) || fallbackName;
+        const cover = this.extractCover($, contentRoot);
+        return { name, path, cover };
+      } catch {
+        return { name: fallbackName, path, cover: defaultCover };
+      }
     }));
+
+    this.catalogCache = items;
+    return items;
   }
 
   private async getHtml(path = ''): Promise<string> {
@@ -56,15 +73,40 @@ class Sousaku implements Plugin.PluginBase {
     return response.text();
   }
 
+  private extractEntryTitle($: ReturnType<typeof load>): string {
+    const candidates = $('article .entry-title, article h1, main .entry-title, main h1, .entry-content h1')
+      .map((_, el) => $(el).text().replace(/\s+/g, ' ').trim())
+      .get()
+      .filter(Boolean);
+
+    for (let i = candidates.length - 1; i >= 0; i--) {
+      const title = candidates[i];
+      if (!/sousaku|kari translates japanese novels/i.test(title)) return title;
+    }
+    return '';
+  }
+
+  private extractCover($: ReturnType<typeof load>, contentRoot: ReturnType<typeof load>): string {
+    const coverSrc = $('meta[property="og:image"]').attr('content')
+      || $('meta[name="twitter:image"]').attr('content')
+      || contentRoot.find('img').first().attr('src');
+    if (!coverSrc) return defaultCover;
+    try {
+      return new URL(coverSrc, this.site).href;
+    } catch {
+      return defaultCover;
+    }
+  }
+
   async popularNovels(pageNo: number, _options?: unknown): Promise<Plugin.NovelItem[]> {
     if (pageNo < 1) return [];
-    const items = this.catalog();
+    const items = await this.catalog();
     const start = (pageNo - 1) * 20;
     return items.slice(start, start + 20);
   }
 
   async searchNovels(searchTerm: string, pageNo = 1): Promise<Plugin.NovelItem[]> {
-    const items = this.catalog();
+    const items = await this.catalog();
     const term = searchTerm.trim().toLowerCase();
     const matches = term
       ? items.filter(item => item.name.toLowerCase().includes(term) || item.path.toLowerCase().includes(term))
@@ -92,14 +134,8 @@ class Sousaku implements Plugin.PluginBase {
     const $ = load(await this.getHtml(novelPath));
     const content = $('.entry-content').first();
     const contentRoot = content.length ? content : $('article').first().length ? $('article').first() : $('main').first();
-
-    const entryTitle = contentRoot.find('h1.entry-title, h1, .entry-title').first().text().replace(/\s+/g, ' ').trim();
-    const name = entryTitle || $('article .entry-title, article h1, main .entry-title, main h1').first().text().replace(/\s+/g, ' ').trim() || novelPath;
-    const coverSrc = $('meta[property="og:image"]').attr('content') || contentRoot.find('img').first().attr('src');
-    let cover = defaultCover;
-    if (coverSrc) {
-      try { cover = new URL(coverSrc, this.site).href; } catch { /* keep default */ }
-    }
+    const name = this.extractEntryTitle($) || novelPath;
+    const cover = this.extractCover($, contentRoot);
 
     const paragraphs = contentRoot.find('p').map((_, el) => $(el).text().replace(/\s+/g, ' ').trim()).get().filter(Boolean);
     const summary = paragraphs.slice(0, 4).join('\n\n') || 'Chapters published by Sousaku.';
@@ -111,7 +147,6 @@ class Sousaku implements Plugin.PluginBase {
     const seen = new Set<string>();
     const chapters: Plugin.ChapterItem[] = [];
     const novelUrl = new URL(novelPath, this.site);
-    const novelPathname = novelUrl.pathname.replace(/^\/+|\/+$/g, '').toLowerCase();
     const siteOrigin = new URL(this.site).origin;
 
     let links = $('.entry-content a[href], article a[href], main a[href]');
@@ -153,8 +188,7 @@ class Sousaku implements Plugin.PluginBase {
       $('a[href]').each((_, element) => {
         const href = $(element).attr('href');
         const text = $(element).text().replace(/\s+/g, ' ').trim();
-        if (!href || !text) return;
-        if (!/(?:chapter|episode|prologue|epilogue|interlude|idle\s*talk)/i.test(text)) return;
+        if (!href || !text || !/(?:chapter|episode|prologue|epilogue|interlude|idle\s*talk)/i.test(text)) return;
         let url: URL;
         try { url = new URL(href, this.site); } catch { return; }
         if (url.origin !== siteOrigin) return;
