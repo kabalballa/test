@@ -17,7 +17,7 @@ class Sousaku implements Plugin.PluginBase {
   name = 'Sousaku – 創作 – We Create!';
   icon = 'src/en/sousaku/icon.svg';
   site = SITE;
-  version = '1.0.12';
+  version = '1.0.13';
 
   private novelCache = new Map<string, CachedNovel>();
   private chapterContentCache = new Map<string, string>();
@@ -147,7 +147,6 @@ class Sousaku implements Plugin.PluginBase {
     const seen = new Set<string>();
     const chapters: Plugin.ChapterItem[] = [];
     const novelUrl = new URL(novelPath, this.site);
-    const siteOrigin = new URL(this.site).origin;
 
     let links = $('.entry-content a[href], article a[href], main a[href]');
     if (!links.length || !hasContentRoot) links = $('a[href]');
@@ -159,23 +158,26 @@ class Sousaku implements Plugin.PluginBase {
 
       let url: URL;
       try { url = new URL(href, this.site); } catch { return; }
-      if (url.origin !== siteOrigin) return;
       if (url.href.replace(/\/$/, '') === novelUrl.href.replace(/\/$/, '')) return;
 
       const path = url.pathname.replace(/^\/+|\/+$/g, '');
       const lowerPath = path.toLowerCase();
       if (!path || seen.has(url.href) || /\.(jpg|jpeg|png|gif|webp|svg|pdf)$/i.test(path)) return;
-      if (/^(category|tag|author|about|contact|discord|donate|patreon|wp-|feed|page)(\/|$)/i.test(path)) return;
 
       const textLooksLikeChapter = /(?:chapter|episode|prologue|epilogue|interlude|idle\s*talk)/i.test(text)
-        || /^\s*\d{1,4}(?:\.\d+)?\s*[-:]/.test(text);
+        || /^\s*\d{1,4}(?:\.\d+)?\s*[-:–—]/.test(text);
       const pathLooksLikeChapter = /(?:chapter|episode|prologue|epilogue|interlude|idle-talk)/i.test(lowerPath)
         || /(?:^|-)\d{1,4}(?:-|\/|$)/.test(lowerPath);
 
+      // Sousaku sometimes hosts the ToC while individual chapters live on
+      // another domain (for example the old WordPress translation site).
+      // Accept external links when their text/path clearly identifies them as
+      // chapters, while still rejecting ordinary navigation and media links.
       if (!textLooksLikeChapter && !pathLooksLikeChapter) return;
+      if (/^(category|tag|author|about|contact|discord|donate|patreon|wp-|feed|page)(\/|$)/i.test(path)) return;
 
       const numberMatch = text.match(/(?:chapter|episode)\s*([0-9]+(?:\.[0-9]+)?)/i)
-        || text.match(/^\s*(\d{1,4}(?:\.\d+)?)\s*[-:]/);
+        || text.match(/^\s*(\d{1,4}(?:\.\d+)?)\s*[-:–—]/);
       seen.add(url.href);
       chapters.push({
         name: text,
@@ -191,7 +193,6 @@ class Sousaku implements Plugin.PluginBase {
         if (!href || !text || !/(?:chapter|episode|prologue|epilogue|interlude|idle\s*talk)/i.test(text)) return;
         let url: URL;
         try { url = new URL(href, this.site); } catch { return; }
-        if (url.origin !== siteOrigin) return;
         if (url.href.replace(/\/$/, '') === novelUrl.href.replace(/\/$/, '')) return;
         if (seen.has(url.href)) return;
         seen.add(url.href);
