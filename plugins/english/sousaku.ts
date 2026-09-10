@@ -17,7 +17,7 @@ class Sousaku implements Plugin.PluginBase {
   name = 'Sousaku – 創作 – We Create!';
   icon = 'src/en/sousaku/icon.svg';
   site = SITE;
-  version = '1.0.8';
+  version = '1.0.9';
 
   private novelCache = new Map<string, CachedNovel>();
   private chapterContentCache = new Map<string, string>();
@@ -90,7 +90,12 @@ class Sousaku implements Plugin.PluginBase {
 
   private async fetchNovel(novelPath: string): Promise<CachedNovel> {
     const $ = load(await this.getHtml(novelPath));
-    const content = $('.entry-content').first();
+    const content = $('.entry-content').first().length
+      ? $('.entry-content').first()
+      : $('article').first().length
+        ? $('article').first()
+        : $('main').first();
+
     const name = $('h1').first().text().replace(/\s+/g, ' ').trim() || $('title').first().text().trim() || novelPath;
     const coverSrc = $('meta[property="og:image"]').attr('content') || content.find('img').first().attr('src');
     let cover = defaultCover;
@@ -98,27 +103,32 @@ class Sousaku implements Plugin.PluginBase {
       try { cover = new URL(coverSrc, this.site).href; } catch { /* keep default */ }
     }
 
-    const paragraphs = content('p').map((_, el) => $(el).text().replace(/\s+/g, ' ').trim()).get().filter(Boolean);
+    const paragraphs = content.find('p').map((_, el) => $(el).text().replace(/\s+/g, ' ').trim()).get().filter(Boolean);
     const summary = paragraphs.slice(0, 4).join('\n\n') || 'Chapters published by Sousaku.';
-    const chapters = this.extractChapters($, novelPath);
+    const chapters = this.extractChapters($, novelPath, content);
     return { name, cover, summary, chapters };
   }
 
-  private extractChapters($: ReturnType<typeof load>, novelPath: string): Plugin.ChapterItem[] {
+  private extractChapters(
+    $: ReturnType<typeof load>,
+    novelPath: string,
+    content: ReturnType<typeof load> extends infer T ? ReturnType<T extends (typeof load) ? T : never> : never,
+  ): Plugin.ChapterItem[] {
     const seen = new Set<string>();
     const chapters: Plugin.ChapterItem[] = [];
     const novelUrl = new URL(novelPath, this.site);
     const novelPathname = novelUrl.pathname.replace(/^\/+|\/+$/g, '');
-    const novelSlug = novelPathname
-      .replace(/-table-of-contents$/, '')
-      .replace(/-toc$/, '');
     const siteOrigin = new URL(this.site).origin;
 
-    // Sousaku's ToC pages contain chapter links in the article, but their
-    // markup varies between older and newer posts. Search article/main links
-    // first and fall back to all same-site links if the theme omits those
-    // containers from the parsed HTML.
-    let links = $('.entry-content a[href], article a[href], main a[href]');
+    const novelBaseCandidates = novelPathname
+      .replace(/-table-of-contents$/i, '')
+      .replace(/-toc$/i, '')
+      .split('-')
+      .filter(Boolean);
+    const novelHint = novelBaseCandidates.join('-').toLowerCase();
+
+    let links = content.find('a[href]');
+    if (!links.length) links = $('.entry-content a[href], article a[href], main a[href]');
     if (!links.length) links = $('a[href]');
 
     links.each((_, element) => {
@@ -132,17 +142,21 @@ class Sousaku implements Plugin.PluginBase {
       if (url.href.replace(/\/$/, '') === novelUrl.href.replace(/\/$/, '')) return;
 
       const path = url.pathname.replace(/^\/+|\/+$/g, '');
+      const lowerPath = path.toLowerCase();
       if (!path || seen.has(url.href) || /\.(jpg|jpeg|png|gif|webp|svg|pdf)$/i.test(path)) return;
-      if (/^(category|tag|author|about|contact|discord|donate|patreon)(\/|$)/i.test(path)) return;
+      if (/^(category|tag|author|about|contact|discord|donate|patreon|wp-|feed)(\/|$)/i.test(path)) return;
+      if (/^\d{4}\/\d{2}\/\d{2}\/[^/]+$/.test(path) && !/chapter|episode|prologue|epilogue/i.test(text)) return;
 
-      // TOC links generally use the novel slug in their path (for example
-      // /labyrinth-renovation-001/), while newer posts use dated paths such
-      // as /2025/12/12/labyrinth-renovation-chapter-50/. Accept both forms.
-      const pathLooksLikeThisNovel = novelSlug && path.toLowerCase().includes(novelSlug.toLowerCase());
-      const textLooksLikeChapter = /(?:chapter|episode|prologue|epilogue|idle talk)/i.test(text)
+      const textLooksLikeChapter = /(?:chapter|episode|prologue|epilogue|interlude|idle talk)/i.test(text)
         || /^\s*\d{1,4}(?:\.\d+)?\s*[-:]/.test(text);
-      const pathLooksLikeChapter = /(?:chapter|episode|prologue|epilogue|idle-talk|(?:^|-)\d{3,4}(?:-|\/|$))/i.test(path);
-      if (!pathLooksLikeThisNovel && !(textLooksLikeChapter && pathLooksLikeChapter)) return;
+      const pathLooksLikeChapter = /(?:chapter|episode|prologue|epilogue|interlude|idle-talk)/i.test(lowerPath)
+        || /(?:^|-)\d{1,4}(?:-|\/|$)/.test(lowerPath);
+      const pathMatchesNovel = novelHint && lowerPath.includes(novelHint);
+
+      // Sousaku's table-of-contents pages consistently expose chapter links
+      // as ordinary anchors. Prefer explicit chapter/episode markers, but also
+      // accept novel-specific paths for older entries whose titles are sparse.
+      if (!textLooksLikeChapter && !pathLooksLikeChapter && !pathMatchesNovel) return;
 
       const numberMatch = text.match(/(?:chapter|episode)\s*([0-9]+(?:\.[0-9]+)?)/i)
         || text.match(/^\s*(\d{1,4}(?:\.\d+)?)\s*[-:]/);
