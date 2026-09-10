@@ -150,12 +150,12 @@ class Sousaku implements Plugin.PluginBase {
   private extractNovelStatus($: ReturnType<typeof load>, slug: string): Plugin.NovelStatus {
     const text = $('article, main, .entry-content').first().text().replace(/\s+/g, ' ').trim();
 
-    if (/\b(?:series|novel)\s*(?:status|state)\s*[:\-]\s*completed\b/i.test(text)
-      || /\bcompleted\b/i.test(text)) {
+    // Only trust explicit status fields on the novel page. The site's footer contains
+    // completion notes for other novels, so a generic "completed" text match is unsafe.
+    if (/\b(?:series|novel)\s*(?:status|state)\s*[:\-]\s*completed\b/i.test(text)) {
       return Plugin.NovelStatus.Completed;
     }
-    if (/\b(?:series|novel)\s*(?:status|state)\s*[:\-]\s*(?:on\s+)?hiatus\b/i.test(text)
-      || /\bon\s+hiatus\b/i.test(text)) {
+    if (/\b(?:series|novel)\s*(?:status|state)\s*[:\-]\s*(?:on\s+)?hiatus\b/i.test(text)) {
       return Plugin.NovelStatus.OnHiatus;
     }
     if (/\b(?:series|novel)\s*(?:status|state)\s*[:\-]\s*(?:cancelled|canceled)\b/i.test(text)) {
@@ -165,7 +165,7 @@ class Sousaku implements Plugin.PluginBase {
       return Plugin.NovelStatus.Ongoing;
     }
 
-    // Sousaku currently identifies these as completed in its site-wide navigation/footer.
+    // Sousaku's site-wide navigation/footer explicitly marks these two translations completed.
     const completedSlugs = new Set([
       'beyond-the-heros-death-table-of-contents',
       'the-abused-merchants-daughter-table-of-contents',
@@ -175,17 +175,21 @@ class Sousaku implements Plugin.PluginBase {
     return Plugin.NovelStatus.Unknown;
   }
 
-  private extractChapterReleaseTime($: ReturnType<typeof load>, url: URL, element: ReturnType<typeof load>[0]): string | undefined {
+  private extractChapterReleaseTime(
+    $: ReturnType<typeof load>,
+    url: URL,
+    element: ReturnType<ReturnType<typeof load>>,
+  ): string | undefined {
     // Most Sousaku chapter permalinks contain the WordPress publication date:
     // /YYYY/MM/DD/slug/. This gives us the date without fetching every chapter.
     const dateMatch = url.pathname.match(/\/(\d{4})\/(\d{2})\/(\d{2})(?:\/|$)/);
     if (dateMatch) return `${dateMatch[1]}-${dateMatch[2]}-${dateMatch[3]}`;
 
     // Also accept common date metadata when the link itself contains it.
-    const rawDate = $(element).attr('datetime')
-      || $(element).attr('data-date')
-      || $(element).closest('[datetime], [data-date]').first().attr('datetime')
-      || $(element).closest('[datetime], [data-date]').first().attr('data-date');
+    const rawDate = element.attr('datetime')
+      || element.attr('data-date')
+      || element.closest('[datetime], [data-date]').first().attr('datetime')
+      || element.closest('[datetime], [data-date]').first().attr('data-date');
     if (rawDate) {
       const parsed = new Date(rawDate);
       if (!Number.isNaN(parsed.getTime())) return parsed.toISOString();
@@ -278,7 +282,7 @@ class Sousaku implements Plugin.PluginBase {
         name: text,
         path: this.toChapterPath(url),
         chapterNumber: numberMatch ? Number(numberMatch[1]) : undefined,
-        releaseTime: this.extractChapterReleaseTime($, url, element),
+        releaseTime: this.extractChapterReleaseTime($, url, $(element)),
       });
     });
 
@@ -297,7 +301,7 @@ class Sousaku implements Plugin.PluginBase {
           name: text,
           path: this.toChapterPath(url),
           chapterNumber: numberMatch ? Number(numberMatch[1]) : undefined,
-          releaseTime: this.extractChapterReleaseTime($, url, element),
+          releaseTime: this.extractChapterReleaseTime($, url, $(element)),
         });
       });
     }
