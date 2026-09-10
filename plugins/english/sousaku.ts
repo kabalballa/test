@@ -17,7 +17,7 @@ class Sousaku implements Plugin.PluginBase {
   name = 'Sousaku – 創作 – We Create!';
   icon = 'src/en/sousaku/icon.svg';
   site = SITE;
-  version = '1.0.17';
+  version = '1.0.18';
 
   private novelCache = new Map<string, CachedNovel>();
   private chapterContentCache = new Map<string, string>();
@@ -102,32 +102,22 @@ class Sousaku implements Plugin.PluginBase {
     return text
       .replace(/\s+/g, ' ')
       .replace(/\s*[–—-]\s*(?:table\s+of\s+contents|toc)\s*$/i, '')
-      .replace(/^\s*(?:table\s+of\s+contents|toc)\s*[–—:-]\s*/i, '')
-      .replace(/\s*[:：]\s*$/, '')
       .trim();
   }
 
   private extractEntryTitle($: ReturnType<typeof load>): string {
-    const firstTitle = $('article .entry-title, article h1, main .entry-title, main h1, .entry-content h1')
-      .map((_, el) => $(el).text().replace(/\s+/g, ' ').trim())
-      .get()
-      .find(Boolean);
+    const entryTitle = $('.entry-content h1.entry-title, .entry-content h1, .entry-content .entry-title').first().text()
+      .replace(/\s+/g, ' ')
+      .trim();
+    const articleTitle = $('article .entry-title, article h1, main .entry-title, main h1').first().text()
+      .replace(/\s+/g, ' ')
+      .trim();
+    const firstTitle = entryTitle || articleTitle;
 
     if (firstTitle) {
-      const normalized = this.normalizeNovelTitle(firstTitle);
-      if (normalized && !/^(sousaku|kari translates japanese novels)$/i.test(normalized)) {
-        return normalized;
-      }
+      const title = this.normalizeNovelTitle(firstTitle);
+      if (title && !/^(sousaku|kari translates japanese novels)$/i.test(title)) return title;
     }
-
-    const fallbackTitles = $('article .entry-title, article h1, main .entry-title, main h1, .entry-content h1')
-      .map((_, el) => $(el).text().replace(/\s+/g, ' ').trim())
-      .get()
-      .filter(Boolean)
-      .map(title => this.normalizeNovelTitle(title))
-      .filter(title => title && !/sousaku|kari translates japanese novels/i.test(title));
-
-    if (fallbackTitles.length) return fallbackTitles[0];
 
     const explicitEnglishTitle = $('article, main, .entry-content')
       .first()
