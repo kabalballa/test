@@ -4,6 +4,7 @@ import { Plugin } from '@/types/plugin';
 import { defaultCover } from '@libs/defaultCover';
 
 const SITE = 'https://sousaku.blog/';
+const EXTERNAL_CHAPTER_HOSTS = new Set(['karitranslations.wordpress.com', 'sousaku.blog']);
 
 type CachedNovel = {
   name: string;
@@ -17,7 +18,7 @@ class Sousaku implements Plugin.PluginBase {
   name = 'Sousaku – 創作 – We Create!';
   icon = 'src/en/sousaku/icon.svg';
   site = SITE;
-  version = '1.0.13';
+  version = '1.0.14';
 
   private novelCache = new Map<string, CachedNovel>();
   private chapterContentCache = new Map<string, string>();
@@ -68,9 +69,26 @@ class Sousaku implements Plugin.PluginBase {
   }
 
   private async getHtml(path = ''): Promise<string> {
-    const response = await fetchApi(new URL(path, this.site).href);
+    const requestUrl = new URL(path, this.site);
+    if (requestUrl.pathname === '/__external_chapter__/' && requestUrl.searchParams.has('url')) {
+      const target = new URL(requestUrl.searchParams.get('url')!);
+      if (!EXTERNAL_CHAPTER_HOSTS.has(target.hostname)) {
+        throw new Error(`Unsupported external Sousaku chapter host: ${target.hostname}`);
+      }
+      const response = await fetchApi(target.href);
+      if (!response.ok) throw new Error(`Sousaku returned ${response.status}`);
+      return response.text();
+    }
+
+    const response = await fetchApi(requestUrl.href);
     if (!response.ok) throw new Error(`Sousaku returned ${response.status}`);
     return response.text();
+  }
+
+  private toChapterPath(url: URL): string {
+    const siteOrigin = new URL(this.site).origin;
+    if (url.origin === siteOrigin) return url.href;
+    return new URL(`/__external_chapter__/?url=${encodeURIComponent(url.href)}`, this.site).href;
   }
 
   private extractEntryTitle($: ReturnType<typeof load>): string {
@@ -169,10 +187,6 @@ class Sousaku implements Plugin.PluginBase {
       const pathLooksLikeChapter = /(?:chapter|episode|prologue|epilogue|interlude|idle-talk)/i.test(lowerPath)
         || /(?:^|-)\d{1,4}(?:-|\/|$)/.test(lowerPath);
 
-      // Sousaku sometimes hosts the ToC while individual chapters live on
-      // another domain (for example the old WordPress translation site).
-      // Accept external links when their text/path clearly identifies them as
-      // chapters, while still rejecting ordinary navigation and media links.
       if (!textLooksLikeChapter && !pathLooksLikeChapter) return;
       if (/^(category|tag|author|about|contact|discord|donate|patreon|wp-|feed|page)(\/|$)/i.test(path)) return;
 
@@ -181,7 +195,7 @@ class Sousaku implements Plugin.PluginBase {
       seen.add(url.href);
       chapters.push({
         name: text,
-        path: url.href,
+        path: this.toChapterPath(url),
         chapterNumber: numberMatch ? Number(numberMatch[1]) : undefined,
       });
     });
@@ -197,7 +211,11 @@ class Sousaku implements Plugin.PluginBase {
         if (seen.has(url.href)) return;
         seen.add(url.href);
         const numberMatch = text.match(/(?:chapter|episode)\s*([0-9]+(?:\.[0-9]+)?)/i);
-        chapters.push({ name: text, path: url.href, chapterNumber: numberMatch ? Number(numberMatch[1]) : undefined });
+        chapters.push({
+          name: text,
+          path: this.toChapterPath(url),
+          chapterNumber: numberMatch ? Number(numberMatch[1]) : undefined,
+        });
       });
     }
 
