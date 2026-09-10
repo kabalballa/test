@@ -17,7 +17,7 @@ class Sousaku implements Plugin.PluginBase {
   name = 'Sousaku – 創作 – We Create!';
   icon = 'src/en/sousaku/icon.svg';
   site = SITE;
-  version = '1.0.15';
+  version = '1.0.16';
 
   private novelCache = new Map<string, CachedNovel>();
   private chapterContentCache = new Map<string, string>();
@@ -98,16 +98,38 @@ class Sousaku implements Plugin.PluginBase {
     return new URL(`/__external_chapter__/?url=${encodeURIComponent(url.href)}`, this.site).href;
   }
 
+  private normalizeNovelTitle(text: string): string {
+    return text
+      .replace(/\s+/g, ' ')
+      .replace(/\s*[–—-]\s*(?:table\s+of\s+contents|toc)\s*$/i, '')
+      .replace(/\s*[:：]\s*$/, '')
+      .trim();
+  }
+
   private extractEntryTitle($: ReturnType<typeof load>): string {
+    const explicitEnglishTitle = $('article, main, .entry-content')
+      .first()
+      .find('*')
+      .map((_, el) => $(el).text().replace(/\s+/g, ' ').trim())
+      .get()
+      .find(text => /^english\s+title\s*:/i.test(text));
+
+    if (explicitEnglishTitle) {
+      const title = explicitEnglishTitle.replace(/^english\s+title\s*:\s*/i, '').trim();
+      if (title) return this.normalizeNovelTitle(title);
+    }
+
     const candidates = $('article .entry-title, article h1, main .entry-title, main h1, .entry-content h1')
       .map((_, el) => $(el).text().replace(/\s+/g, ' ').trim())
       .get()
       .filter(Boolean);
 
-    for (let i = candidates.length - 1; i >= 0; i--) {
-      const title = candidates[i];
-      if (!/sousaku|kari translates japanese novels/i.test(title)) return title;
+    for (const candidate of candidates) {
+      if (/sousaku|kari translates japanese novels/i.test(candidate)) continue;
+      const title = this.normalizeNovelTitle(candidate);
+      if (title) return title;
     }
+
     return '';
   }
 
