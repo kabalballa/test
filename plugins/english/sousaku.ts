@@ -1,5 +1,6 @@
 import { load } from 'cheerio';
 import { fetchApi } from '@libs/fetch';
+import { NovelStatus } from '@libs/novelStatus';
 import { Plugin } from '@/types/plugin';
 import { defaultCover } from '@libs/defaultCover';
 
@@ -18,7 +19,7 @@ class Sousaku implements Plugin.PluginBase {
   name = 'Sousaku – 創作 – We Create!';
   icon = 'src/en/sousaku/icon.svg';
   site = SITE;
-  version = '1.1.0';
+  version = '1.1.1';
 
   private novelCache = new Map<string, CachedNovel>();
   private chapterContentCache = new Map<string, string>();
@@ -150,29 +151,26 @@ class Sousaku implements Plugin.PluginBase {
   private extractNovelStatus($: ReturnType<typeof load>, slug: string): Plugin.NovelStatus {
     const text = $('article, main, .entry-content').first().text().replace(/\s+/g, ' ').trim();
 
-    // Only trust explicit status fields on the novel page. The site's footer contains
-    // completion notes for other novels, so a generic "completed" text match is unsafe.
     if (/\b(?:series|novel)\s*(?:status|state)\s*[:\-]\s*completed\b/i.test(text)) {
-      return Plugin.NovelStatus.Completed;
+      return NovelStatus.Completed;
     }
     if (/\b(?:series|novel)\s*(?:status|state)\s*[:\-]\s*(?:on\s+)?hiatus\b/i.test(text)) {
-      return Plugin.NovelStatus.OnHiatus;
+      return NovelStatus.OnHiatus;
     }
     if (/\b(?:series|novel)\s*(?:status|state)\s*[:\-]\s*(?:cancelled|canceled)\b/i.test(text)) {
-      return Plugin.NovelStatus.Cancelled;
+      return NovelStatus.Cancelled;
     }
     if (/\b(?:series|novel)\s*(?:status|state)\s*[:\-]\s*(?:ongoing|active|in progress)\b/i.test(text)) {
-      return Plugin.NovelStatus.Ongoing;
+      return NovelStatus.Ongoing;
     }
 
-    // Sousaku's site-wide navigation/footer explicitly marks these two translations completed.
     const completedSlugs = new Set([
       'beyond-the-heros-death-table-of-contents',
       'the-abused-merchants-daughter-table-of-contents',
     ]);
-    if (completedSlugs.has(slug)) return Plugin.NovelStatus.Completed;
+    if (completedSlugs.has(slug)) return NovelStatus.Completed;
 
-    return Plugin.NovelStatus.Unknown;
+    return NovelStatus.Unknown;
   }
 
   private extractChapterReleaseTime(
@@ -180,12 +178,9 @@ class Sousaku implements Plugin.PluginBase {
     url: URL,
     element: ReturnType<ReturnType<typeof load>>,
   ): string | undefined {
-    // Most Sousaku chapter permalinks contain the WordPress publication date:
-    // /YYYY/MM/DD/slug/. This gives us the date without fetching every chapter.
     const dateMatch = url.pathname.match(/\/(\d{4})\/(\d{2})\/(\d{2})(?:\/|$)/);
     if (dateMatch) return `${dateMatch[1]}-${dateMatch[2]}-${dateMatch[3]}`;
 
-    // Also accept common date metadata when the link itself contains it.
     const rawDate = element.attr('datetime')
       || element.attr('data-date')
       || element.closest('[datetime], [data-date]').first().attr('datetime')
