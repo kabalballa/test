@@ -4,7 +4,6 @@ import { Plugin } from '@/types/plugin';
 import { defaultCover } from '@libs/defaultCover';
 
 const SITE = 'https://sousaku.blog/';
-const EXTERNAL_CHAPTER_HOSTS = new Set(['karitranslations.wordpress.com', 'sousaku.blog']);
 
 type CachedNovel = {
   name: string;
@@ -18,7 +17,7 @@ class Sousaku implements Plugin.PluginBase {
   name = 'Sousaku – 創作 – We Create!';
   icon = 'src/en/sousaku/icon.svg';
   site = SITE;
-  version = '1.0.14';
+  version = '1.0.15';
 
   private novelCache = new Map<string, CachedNovel>();
   private chapterContentCache = new Map<string, string>();
@@ -70,10 +69,18 @@ class Sousaku implements Plugin.PluginBase {
 
   private async getHtml(path = ''): Promise<string> {
     const requestUrl = new URL(path, this.site);
-    if (requestUrl.pathname === '/__external_chapter__/' && requestUrl.searchParams.has('url')) {
-      const target = new URL(requestUrl.searchParams.get('url')!);
-      if (!EXTERNAL_CHAPTER_HOSTS.has(target.hostname)) {
-        throw new Error(`Unsupported external Sousaku chapter host: ${target.hostname}`);
+    const marker = '/__external_chapter__/';
+    if (requestUrl.pathname === marker && requestUrl.searchParams.has('url')) {
+      const encodedTarget = requestUrl.searchParams.get('url');
+      if (!encodedTarget) throw new Error('Missing external Sousaku chapter URL');
+      let target: URL;
+      try {
+        target = new URL(encodedTarget);
+      } catch {
+        throw new Error('Invalid external Sousaku chapter URL');
+      }
+      if (target.protocol !== 'https:' && target.protocol !== 'http:') {
+        throw new Error(`Unsupported external Sousaku chapter protocol: ${target.protocol}`);
       }
       const response = await fetchApi(target.href);
       if (!response.ok) throw new Error(`Sousaku returned ${response.status}`);
