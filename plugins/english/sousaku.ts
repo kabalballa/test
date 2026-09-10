@@ -19,7 +19,7 @@ class Sousaku implements Plugin.PluginBase {
   name = 'Sousaku – 創作 – We Create!';
   icon = 'src/en/sousaku/icon.svg';
   site = SITE;
-  version = '1.1.1';
+  version = '1.1.2';
 
   private novelCache = new Map<string, CachedNovel>();
   private chapterContentCache = new Map<string, string>();
@@ -193,6 +193,30 @@ class Sousaku implements Plugin.PluginBase {
     return undefined;
   }
 
+  private isSpecialSectionLink($: ReturnType<typeof load>, element: ReturnType<ReturnType<typeof load>>): boolean {
+    const text = $(element).text().replace(/\s+/g, ' ').trim();
+    if (/^illustrations?\b/i.test(text) || /^manga\b/i.test(text)) return true;
+
+    const sectionHeading = $(element)
+      .closest('li, p, div')
+      .prevAll('h1, h2, h3, h4, h5, h6')
+      .first()
+      .text()
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (/^(?:illustrations?|manga)\s*:?$/i.test(sectionHeading)) return true;
+
+    const ancestors = $(element).parentsUntil('.entry-content, article, main').addBack();
+    let insideSpecialSection = false;
+    ancestors.each((_, node) => {
+      const tag = String(node.name || '').toLowerCase();
+      if (/^h[1-6]$/.test(tag) && /^(?:illustrations?|manga)\s*:?$/i.test($(node).text().replace(/\s+/g, ' ').trim())) {
+        insideSpecialSection = true;
+      }
+    });
+    return insideSpecialSection;
+  }
+
   async popularNovels(pageNo: number, _options?: unknown): Promise<Plugin.NovelItem[]> {
     if (pageNo < 1) return [];
     const items = await this.catalog();
@@ -252,7 +276,7 @@ class Sousaku implements Plugin.PluginBase {
     links.each((_, element) => {
       const href = $(element).attr('href');
       const text = $(element).text().replace(/\s+/g, ' ').trim();
-      if (!href || !text) return;
+      if (!href || !text || this.isSpecialSectionLink($, $(element))) return;
 
       let url: URL;
       try { url = new URL(href, this.site); } catch { return; }
@@ -261,6 +285,7 @@ class Sousaku implements Plugin.PluginBase {
       const path = url.pathname.replace(/^\/+|\/+$/g, '');
       const lowerPath = path.toLowerCase();
       if (!path || seen.has(url.href) || /\.(jpg|jpeg|png|gif|webp|svg|pdf)$/i.test(path)) return;
+      if (/(?:^|[\s_-])illustrations?(?:[\s_-]|$)/i.test(`${text} ${path}`) || /(?:^|[\s_-])manga(?:[\s_-]|$)/i.test(`${text} ${path}`)) return;
 
       const textLooksLikeChapter = /(?:chapter|episode|prologue|epilogue|interlude|idle\s*talk)/i.test(text)
         || /^\s*\d{1,4}(?:\.\d+)?\s*[-:–—]/.test(text);
@@ -285,7 +310,7 @@ class Sousaku implements Plugin.PluginBase {
       $('a[href]').each((_, element) => {
         const href = $(element).attr('href');
         const text = $(element).text().replace(/\s+/g, ' ').trim();
-        if (!href || !text || !/(?:chapter|episode|prologue|epilogue|interlude|idle\s*talk)/i.test(text)) return;
+        if (!href || !text || this.isSpecialSectionLink($, $(element)) || /(?:^|[\s_-])illustrations?(?:[\s_-]|$)/i.test(`${text} ${href}`) || /(?:^|[\s_-])manga(?:[\s_-]|$)/i.test(`${text} ${href}`) || !/(?:chapter|episode|prologue|epilogue|interlude|idle\s*talk)/i.test(text)) return;
         let url: URL;
         try { url = new URL(href, this.site); } catch { return; }
         if (url.href.replace(/\/$/, '') === novelUrl.href.replace(/\/$/, '')) return;
