@@ -21,7 +21,7 @@ class Sousaku implements Plugin.PluginBase {
   name = 'Sousaku – 創作 – We Create!';
   icon = 'src/en/sousaku/icon.svg';
   site = SITE;
-  version = '1.2.0';
+  version = '1.2.1';
 
   private novelCache = new Map<string, CachedNovel>();
   private chapterContentCache = new Map<string, string>();
@@ -48,26 +48,44 @@ class Sousaku implements Plugin.PluginBase {
     ['Isekai wo Seigyo Mahou de Kirihirake!', 'isekai-wo-seigyo-mahou-de-kirihirake'],
   ] as const;
 
-  private async catalog(): Promise<Plugin.NovelItem[]> {
-    if (this.catalogCache) return this.catalogCache;
-    const items = await Promise.all(this.knownNovels.map(async ([fallbackName, slug]) => {
-      const path = new URL(`${slug}/`, this.site).href;
-      try {
-        const $ = load(await this.getHtml(path));
-        const contentRoot = $('.entry-content').first().length
-          ? $('.entry-content').first()
-          : $('article').first().length
-            ? $('article').first()
-            : $('main').first();
-        const name = this.extractEntryTitle($) || fallbackName;
-        const cover = this.extractCover($, contentRoot);
-        return { name, path, cover };
-      } catch {
-        return { name: fallbackName, path, cover: defaultCover };
-      }
-    }));
-    this.catalogCache = items;
-    return items;
+  private cleanText(text: string): string {
+    return text
+      .replace(/[\u200b\u200c\u200d\ufeff]/g, '')
+      .replace(/[’‘]/g, "'")
+      .replace(/[“”]/g, '"')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  private normalizeNovelTitle(text: string): string {
+    return this.cleanText(text).replace(/\s*[–—-]\s*(?:table\s+of\s+contents|toc)\s*$/i, '').trim();
+  }
+
+  private normalizeChapterLabel(text: string): string {
+    return this.cleanText(text)
+      .toLowerCase()
+      .replace(/^chapter\s+/, '')
+      .replace(/^episode\s+/, '')
+      .replace(/^no\.\s*/i, '');
+  }
+
+  private isChapterMarkerText(text: string): boolean {
+    const normalized = this.cleanText(text);
+    return /^(?:chapter\s+|episode\s+|prologue\b|epilogue\b|interlude\b|idle\s*talk\b)/i.test(normalized)
+      || /^\d{1,4}(?:\.\d+)?[a-z]?\s*(?:[-:–—.]|$)/i.test(normalized);
+  }
+
+  private chapterLabelMatches(text: string, requestedLabel: string): boolean {
+    const value = this.normalizeChapterLabel(text);
+    const requested = this.normalizeChapterLabel(requestedLabel);
+    if (!value || !requested) return false;
+    return value === requested
+      || value.startsWith(`${requested}:`)
+      || value.startsWith(`${requested} -`)
+      || value.startsWith(`${requested} –`)
+      || value.startsWith(`${requested} —`)
+      || value.startsWith(`${requested}.`)
+      || value.startsWith(`${requested} `);
   }
 
   private async getHtml(path = ''): Promise<string> {
@@ -76,7 +94,11 @@ class Sousaku implements Plugin.PluginBase {
       const encodedTarget = requestUrl.searchParams.get('url');
       if (!encodedTarget) throw new Error('Missing Sousaku chapter URL');
       let target: URL;
-      try { target = new URL(encodedTarget); } catch { throw new Error('Invalid Sousaku chapter URL'); }
+      try {
+        target = new URL(encodedTarget);
+      } catch {
+        throw new Error('Invalid Sousaku chapter URL');
+      }
       if (target.protocol !== 'https:' && target.protocol !== 'http:') {
         throw new Error(`Unsupported Sousaku chapter protocol: ${target.protocol}`);
       }
@@ -101,70 +123,60 @@ class Sousaku implements Plugin.PluginBase {
     ).href;
   }
 
-  private normalizeNovelTitle(text: string): string {
-    return text.replace(/\s+/g, ' ').replace(/\s*[–—-]\s*(?:table\s+of\s+contents|toc)\s*$/i, '').trim();
-  }
-
-  private normalizeChapterLabel(text: string): string {
-    return text
-      .replace(/[\u200b\u200c\u200d\ufeff]/g, '')
-      .replace(/[’‘]/g, "'")
-      .replace(/[“”]/g, '"')
-      .replace(/\s+/g, ' ')
-      .trim()
-      .toLowerCase()
-      .replace(/^chapter\s+/, '')
-      .replace(/^episode\s+/, '');
-  }
-
   private extractEntryTitle($: ReturnType<typeof load>): string {
-    const entryTitle = $('.entry-content h1.entry-title, .entry-content h1, .entry-content .entry-title').first().text().replace(/\s+/g, ' ').trim();
-    const articleTitle = $('article .entry-title, article h1, main .entry-title, main h1').first().text().replace(/\s+/g, ' ').trim();
-    const firstTitle = entryTitle || articleTitle;
-    if (firstTitle) {
-      const title = this.normalizeNovelTitle(firstTitle);
-      if (title && !/^(sousaku|kari translates japanese novels)$/i.test(title)) return title;
-    }
-    const explicitEnglishTitle = $('article, main, .entry-content').first().find('*')
-      .map((_, el) => $(el).text().replace(/\s+/g, ' ').trim()).get()
+    const title = $('.entry-content .entry-title, .entry-content h1, article .entry-title, article h1, main .entry-title, main h1')
+      .first().text();
+    const cleaned = this.normalizeNovelTitle(title);
+    if (cleaned && !/^(sousaku|kari translates japanese novels)$/i.test(cleaned)) return cleaned;
+
+    const explicit = $('.entry-content, article, main').first().find('*')
+      .map((_, el) => this.cleanText($(el).text())).get()
       .find(text => /^english\s+title\s*:/i.test(text));
-    if (explicitEnglishTitle) return this.normalizeNovelTitle(explicitEnglishTitle.replace(/^english\s+title\s*:\s*/i, '').trim());
-    return '';
+    return explicit ? this.normalizeNovelTitle(explicit.replace(/^english\s+title\s*:\s*/i, '')) : '';
   }
 
-  private extractCover($: ReturnType<typeof load>, contentRoot: ReturnType<typeof load>): string {
-    const coverSrc = $('meta[property="og:image"]').attr('content') || $('meta[name="twitter:image"]').attr('content') || contentRoot.find('img').first().attr('src');
-    if (!coverSrc) return defaultCover;
-    try { return new URL(coverSrc, this.site).href; } catch { return defaultCover; }
+  private extractCover($: ReturnType<typeof load>, contentRoot: ReturnType<ReturnType<typeof load>>): string {
+    const src = $('meta[property="og:image"]').attr('content')
+      || $('meta[name="twitter:image"]').attr('content')
+      || contentRoot.find('img').first().attr('src');
+    if (!src) return defaultCover;
+    try {
+      return new URL(src, this.site).href;
+    } catch {
+      return defaultCover;
+    }
   }
 
   private extractNovelStatus($: ReturnType<typeof load>, slug: string): Plugin.NovelStatus {
-    const text = $('article, main, .entry-content').first().text().replace(/\s+/g, ' ').trim();
+    const text = this.cleanText($('.entry-content, article, main').first().text());
     if (/\b(?:series|novel)\s*(?:status|state)\s*[:\-]\s*completed\b/i.test(text)) return NovelStatus.Completed;
     if (/\b(?:series|novel)\s*(?:status|state)\s*[:\-]\s*(?:on\s+)?hiatus\b/i.test(text)) return NovelStatus.OnHiatus;
     if (/\b(?:series|novel)\s*(?:status|state)\s*[:\-]\s*(?:cancelled|canceled)\b/i.test(text)) return NovelStatus.Cancelled;
     if (/\b(?:series|novel)\s*(?:status|state)\s*[:\-]\s*(?:ongoing|active|in progress)\b/i.test(text)) return NovelStatus.Ongoing;
-    const completedSlugs = new Set(['beyond-the-heros-death-table-of-contents', 'the-abused-merchants-daughter-table-of-contents']);
-    if (completedSlugs.has(slug)) return NovelStatus.Completed;
+    if (new Set(['beyond-the-heros-death-table-of-contents', 'the-abused-merchants-daughter-table-of-contents']).has(slug)) return NovelStatus.Completed;
     return NovelStatus.Unknown;
   }
 
-  private extractChapterReleaseTime($: ReturnType<typeof load>, url: URL, element: ReturnType<ReturnType<typeof load>>): string | undefined {
+  private extractChapterReleaseTime(url: URL, element: ReturnType<ReturnType<typeof load>>): string | undefined {
     const dateMatch = url.pathname.match(/\/(\d{4})\/(\d{2})\/(\d{2})(?:\/|$)/);
     if (dateMatch) return `${dateMatch[1]}-${dateMatch[2]}-${dateMatch[3]}`;
-    const rawDate = element.attr('datetime') || element.attr('data-date') || element.closest('[datetime], [data-date]').first().attr('datetime') || element.closest('[datetime], [data-date]').first().attr('data-date');
-    if (rawDate) {
-      const parsed = new Date(rawDate);
-      if (!Number.isNaN(parsed.getTime())) return parsed.toISOString();
-    }
-    return undefined;
+    const raw = element.attr('datetime') || element.attr('data-date')
+      || element.closest('[datetime], [data-date]').first().attr('datetime')
+      || element.closest('[datetime], [data-date]').first().attr('data-date');
+    if (!raw) return undefined;
+    const parsed = new Date(raw);
+    return Number.isNaN(parsed.getTime()) ? undefined : parsed.toISOString();
   }
 
-  private extractChapters($: ReturnType<typeof load>, novelPath: string, _hasContentRoot: boolean): Plugin.ChapterItem[] {
+  private extractChapters($: ReturnType<typeof load>, novelPath: string): Plugin.ChapterItem[] {
     const seen = new Set<string>();
     const chapters: Plugin.ChapterItem[] = [];
     const novelUrl = new URL(novelPath, this.site);
-    const contentRoot = $('.entry-content').first().length ? $('.entry-content').first() : $('article').first().length ? $('article').first() : $('main').first();
+    const contentRoot = $('.entry-content').first().length
+      ? $('.entry-content').first()
+      : $('article').first().length
+        ? $('article').first()
+        : $('main').first();
     const root = contentRoot.length ? contentRoot : $('body');
     const excludedPattern = /^(?:illustrations?|manga)\s*:?\s*$/i;
     let inExcludedSection = false;
@@ -172,7 +184,7 @@ class Sousaku implements Plugin.PluginBase {
     root.find('h1, h2, h3, h4, h5, h6, a[href]').each((_, node) => {
       const tag = String(node.name || '').toLowerCase();
       const element = $(node);
-      const text = element.text().replace(/\s+/g, ' ').trim();
+      const text = this.cleanText(element.text());
 
       if (/^h[1-6]$/.test(tag)) {
         inExcludedSection = excludedPattern.test(text);
@@ -184,12 +196,16 @@ class Sousaku implements Plugin.PluginBase {
       if (!href || !text) return;
 
       let url: URL;
-      try { url = new URL(href, this.site); } catch { return; }
+      try {
+        url = new URL(href, this.site);
+      } catch {
+        return;
+      }
 
-      const cleanTarget = new URL(url.href);
-      cleanTarget.searchParams.delete(CHAPTER_MARKER);
-      const originalFragment = cleanTarget.hash;
-      const cleanBase = new URL(cleanTarget.href);
+      const target = new URL(url.href);
+      target.searchParams.delete(CHAPTER_MARKER);
+      const fragment = target.hash;
+      const cleanBase = new URL(target.href);
       cleanBase.hash = '';
 
       if (cleanBase.href.replace(/\/$/, '') === novelUrl.href.replace(/\/$/, '')) return;
@@ -199,104 +215,80 @@ class Sousaku implements Plugin.PluginBase {
       if (!path || /\.(jpg|jpeg|png|gif|webp|svg|pdf)$/i.test(path)) return;
       if (/(?:^|[\s_-])illustrations?(?:[\s_-]|$)/i.test(`${text} ${path}`) || /(?:^|[\s_-])manga(?:[\s_-]|$)/i.test(`${text} ${path}`)) return;
 
-      const textLooksLikeChapter = /(?:chapter|episode|prologue|epilogue|interlude|idle\s*talk)/i.test(text) || /^\s*\d{1,4}(?:\.\d+)?\s*[-:–—]/.test(text);
-      const pathLooksLikeChapter = /(?:chapter|episode|prologue|epilogue|interlude|idle-talk)/i.test(lowerPath) || /(?:^|-)\d{1,4}(?:-|\/|$)/.test(lowerPath);
+      const textLooksLikeChapter = this.isChapterMarkerText(text) || /\b(?:chapter|episode)\b/i.test(text);
+      const pathLooksLikeChapter = /(?:chapter|episode|prologue|epilogue|interlude|idle-talk)/i.test(lowerPath) || /(?:^|-)\d{1,4}(?:[a-z]|-|\/|$)/i.test(lowerPath);
       if (!textLooksLikeChapter && !pathLooksLikeChapter) return;
       if (/^(category|tag|author|about|contact|discord|donate|patreon|wp-|feed|page)(\/|$)/i.test(path)) return;
 
-      const identity = `${cleanBase.href.replace(/\/$/, '')}::${this.normalizeChapterLabel(text)}::${originalFragment}`;
+      const identity = `${cleanBase.href.replace(/\/$/, '')}::${this.normalizeChapterLabel(text)}::${fragment}`;
       if (seen.has(identity)) return;
       seen.add(identity);
 
-      const numberMatch = text.match(/(?:chapter|episode)\s*([0-9]+(?:\.[0-9]+)?)/i) || text.match(/^\s*(\d{1,4}(?:\.\d+)?)\s*[-:–—]/);
-      chapters.push({
+      const numberMatch = text.match(/(?:chapter|episode)\s*([0-9]+(?:\.[0-9]+)?)/i)
+        || text.match(/^\s*(\d{1,4}(?:\.\d+)?)/);
+      const chapter: Plugin.ChapterItem = {
         name: text,
-        path: this.toChapterPath(cleanTarget, text),
+        path: this.toChapterPath(target, text),
         chapterNumber: numberMatch ? Number(numberMatch[1]) : undefined,
-        releaseTime: this.extractChapterReleaseTime($, cleanBase, element),
-      });
+        releaseTime: this.extractChapterReleaseTime(cleanBase, element),
+      };
 
-      const chapter = chapters[chapters.length - 1];
-      if (chapter && originalFragment) {
+      if (fragment) {
         const wrapper = new URL(chapter.path, this.site);
         const encodedTarget = wrapper.searchParams.get('url');
         if (encodedTarget) {
-          const target = new URL(encodedTarget);
-          target.hash = originalFragment;
-          wrapper.searchParams.set('url', target.href);
+          const preservedTarget = new URL(encodedTarget);
+          preservedTarget.hash = fragment;
+          wrapper.searchParams.set('url', preservedTarget.href);
           chapter.path = wrapper.href;
         }
       }
+      chapters.push(chapter);
     });
 
     return chapters;
   }
 
-  private isChapterMarkerText(text: string): boolean {
-    const normalized = text.replace(/[\u200b\u200c\u200d\ufeff]/g, '').replace(/\s+/g, ' ').trim();
-    return /^(?:chapter\s+|episode\s+|prologue\b|epilogue\b|interlude\b|idle\s*talk\b)/i.test(normalized);
-  }
+  private findChapterMarker($: ReturnType<typeof load>, root: ReturnType<ReturnType<typeof load>>, requestedLabel: string, fragment = ''): ReturnType<ReturnType<typeof load>> {
+    const allElements = root.find('*').toArray();
 
-  private findChapterMarker($: ReturnType<typeof load>, root: ReturnType<ReturnType<typeof load>>, requestedLabel: string, fragment = ''): ReturnType<typeof load> {
     if (fragment) {
       const id = decodeURIComponent(fragment.replace(/^#/, ''));
-      const escaped = id.replace(/([\\.#:[\],>+~*])/g, '\\$1');
-      const target = root.find(`#${escaped}`).first();
+      const target = root.find(`[id="${id.replace(/"/g, '\\"')}"]`).first().length
+        ? root.find(`[id="${id.replace(/"/g, '\\"')}"]`).first()
+        : root.find(`[name="${id.replace(/"/g, '\\"')}"]`).first();
+
       if (target.length) {
-        const targetText = target.text().replace(/[\u200b\u200c\u200d\ufeff]/g, '').replace(/\s+/g, ' ').trim();
-        const targetTag = String(target[0]?.name || '').toLowerCase();
-        if (/^h[1-6]$/.test(targetTag) || this.isChapterMarkerText(targetText)) return target;
+        const targetNode = target[0];
+        const targetIndex = allElements.indexOf(targetNode as never);
+        const targetText = this.cleanText(target.text());
+        if (this.chapterLabelMatches(targetText, requestedLabel) || this.isChapterMarkerText(targetText)) return target;
 
-        const parent = target.parent();
-        if (parent.length) {
-          const parentText = parent.text().replace(/[\u200b\u200c\u200d\ufeff]/g, '').replace(/\s+/g, ' ').trim();
-          const parentTag = String(parent[0]?.name || '').toLowerCase();
-          if (/^h[1-6]$/.test(parentTag) || this.isChapterMarkerText(parentText)) return parent;
-        }
-
-        let current = target.next();
-        while (current.length) {
-          const currentTag = String(current[0]?.name || '').toLowerCase();
-          const currentText = current.text().replace(/[\u200b\u200c\u200d\ufeff]/g, '').replace(/\s+/g, ' ').trim();
-          if (/^h[1-6]$/.test(currentTag) || this.isChapterMarkerText(currentText)) return current;
-          current = current.next();
-        }
-      }
-
-      const named = root.find(`[name="${id.replace(/"/g, '\\"')}"]`).first();
-      if (named.length) {
-        const namedText = named.text().replace(/[\u200b\u200c\u200d\ufeff]/g, '').replace(/\s+/g, ' ').trim();
-        const namedTag = String(named[0]?.name || '').toLowerCase();
-        if (/^h[1-6]$/.test(namedTag) || this.isChapterMarkerText(namedText)) return named;
-        let current = named.next();
-        while (current.length) {
-          const currentTag = String(current[0]?.name || '').toLowerCase();
-          const currentText = current.text().replace(/[\u200b\u200c\u200d\ufeff]/g, '').replace(/\s+/g, ' ').trim();
-          if (/^h[1-6]$/.test(currentTag) || this.isChapterMarkerText(currentText)) return current;
-          current = current.next();
+        for (let i = Math.max(0, targetIndex + 1); i < allElements.length; i += 1) {
+          const candidate = $(allElements[i]);
+          const candidateText = this.cleanText(candidate.text());
+          if (!candidateText) continue;
+          if (!this.isChapterMarkerText(candidateText) && !this.chapterLabelMatches(candidateText, requestedLabel)) continue;
+          if (this.chapterLabelMatches(candidateText, requestedLabel)) return candidate;
+          if (this.isChapterMarkerText(candidateText)) return candidate;
         }
       }
     }
 
     const normalized = this.normalizeChapterLabel(requestedLabel);
-    if (!normalized) return root.find('__no_such_chapter_marker__').first();
+    if (!normalized) return $([]);
 
     return root.find('h1, h2, h3, h4, h5, h6, p, div, li, strong, b, span').filter((_, element) => {
-      const text = $(element).text().replace(/[\u200b\u200c\u200d\ufeff]/g, '').replace(/\s+/g, ' ').trim();
-      const value = this.normalizeChapterLabel(text);
-      if (!text || !this.isChapterMarkerText(text)) return false;
-      return value === normalized
-        || value.startsWith(`${normalized}:`)
-        || value.startsWith(`${normalized} -`)
-        || value.startsWith(`${normalized} –`)
-        || value.startsWith(`${normalized} —`);
+      const text = this.cleanText($(element).text());
+      return this.chapterLabelMatches(text, requestedLabel)
+        || (this.isChapterMarkerText(text) && this.normalizeChapterLabel(text).startsWith(normalized));
     }).first();
   }
 
   private getChapterBlock(marker: ReturnType<ReturnType<typeof load>>): ReturnType<ReturnType<typeof load>> {
     const tag = String(marker[0]?.name || '').toLowerCase();
-    if (/^(strong|b|span|a)$/.test(tag)) {
-      const parent = marker.parent();
+    if (/^(strong|b|span)$/.test(tag)) {
+      const parent = marker.closest('p, div, li').first();
       if (parent.length) return parent;
     }
     return marker;
@@ -310,34 +302,51 @@ class Sousaku implements Plugin.PluginBase {
     const blockTag = String(block[0]?.name || '').toLowerCase();
     const result: string[] = [];
 
-    if (/^h[1-6]$/.test(blockTag)) {
-      const level = Number(blockTag.slice(1));
+    const addFollowingSiblings = (level?: number) => {
       let current = block.next();
       while (current.length) {
         const currentTag = String(current[0]?.name || '').toLowerCase();
-        const currentText = current.text().replace(/[\u200b\u200c\u200d\ufeff]/g, '').replace(/\s+/g, ' ').trim();
-        if (/^h[1-6]$/.test(currentTag) && Number(currentTag.slice(1)) <= level) break;
+        const currentText = this.cleanText(current.text());
+
+        if (/^h[1-6]$/.test(currentTag) && level !== undefined && Number(currentTag.slice(1)) <= level) break;
         if (currentText && this.isChapterMarkerText(currentText)) break;
-        result.push($.html(current) || '');
+
+        const html = $.html(current);
+        if (html) result.push(html);
         current = current.next();
       }
-      return result.filter(Boolean).join('').trim();
+    };
+
+    if (/^h[1-6]$/.test(blockTag)) {
+      addFollowingSiblings(Number(blockTag.slice(1)));
+    } else {
+      addFollowingSiblings();
     }
 
-    const parent = block.parent();
-    if (!parent.length) return '';
-    let current = block.next();
-    while (current.length) {
-      const currentTag = String(current[0]?.name || '').toLowerCase();
-      const currentText = current.text().replace(/[\u200b\u200c\u200d\ufeff]/g, '').replace(/\s+/g, ' ').trim();
-      if (/^h[1-6]$/.test(currentTag) || (currentText && this.isChapterMarkerText(currentText))) break;
-      result.push($.html(current) || '');
-      current = current.next();
-    }
     return result.filter(Boolean).join('').trim();
   }
 
-  async popularNovels(pageNo: number, _options?: unknown): Promise<Plugin.NovelItem[]> {
+  private async catalog(): Promise<Plugin.NovelItem[]> {
+    if (this.catalogCache) return this.catalogCache;
+    const items = await Promise.all(this.knownNovels.map(async ([fallbackName, slug]) => {
+      const path = new URL(`${slug}/`, this.site).href;
+      try {
+        const $ = load(await this.getHtml(path));
+        const contentRoot = $('.entry-content').first().length ? $('.entry-content').first() : $('article').first().length ? $('article').first() : $('main').first();
+        return {
+          name: this.extractEntryTitle($) || fallbackName,
+          path,
+          cover: this.extractCover($, contentRoot),
+        };
+      } catch {
+        return { name: fallbackName, path, cover: defaultCover };
+      }
+    }));
+    this.catalogCache = items;
+    return items;
+  }
+
+  async popularNovels(pageNo: number): Promise<Plugin.NovelItem[]> {
     if (pageNo < 1) return [];
     const items = await this.catalog();
     const start = (pageNo - 1) * 20;
@@ -358,7 +367,14 @@ class Sousaku implements Plugin.PluginBase {
       cached = await this.fetchNovel(novelPath);
       this.novelCache.set(novelPath, cached);
     }
-    return { name: cached.name, path: novelPath, cover: cached.cover, summary: cached.summary, status: cached.status, chapters: cached.chapters.slice() };
+    return {
+      name: cached.name,
+      path: novelPath,
+      cover: cached.cover,
+      summary: cached.summary,
+      status: cached.status,
+      chapters: cached.chapters.slice(),
+    };
   }
 
   private async fetchNovel(novelPath: string): Promise<CachedNovel> {
@@ -369,9 +385,8 @@ class Sousaku implements Plugin.PluginBase {
     const cover = this.extractCover($, contentRoot);
     const slug = new URL(novelPath, this.site).pathname.replace(/^\/+|\/+$/g, '');
     const status = this.extractNovelStatus($, slug);
-    const paragraphs = contentRoot.find('p').map((_, el) => $(el).text().replace(/\s+/g, ' ').trim()).get().filter(Boolean);
-    const summary = paragraphs.slice(0, 4).join('\n\n') || 'Chapters published by Sousaku.';
-    const chapters = this.extractChapters($, novelPath, contentRoot.length > 0);
+    const summary = contentRoot.find('p').map((_, el) => this.cleanText($(el).text())).get().filter(Boolean).slice(0, 4).join('\n\n') || 'Chapters published by Sousaku.';
+    const chapters = this.extractChapters($, novelPath);
     return { name, cover, summary, status, chapters };
   }
 
@@ -417,13 +432,8 @@ class Sousaku implements Plugin.PluginBase {
     element.find('script, style, nav, header, footer, form, .sharedaddy, .jp-relatedposts, .comments-area').remove();
 
     let result = '';
-    if (fragment || requestedLabel) {
-      result = this.extractRequestedChapter($, element, requestedLabel, fragment);
-    }
-
-    if ((fragment || requestedLabel) && !result) {
-      result = '<p>Requested chapter could not be isolated.</p>';
-    }
+    if (fragment || requestedLabel) result = this.extractRequestedChapter($, element, requestedLabel, fragment);
+    if ((fragment || requestedLabel) && !result) result = '<p>Requested chapter could not be isolated.</p>';
     if (!result) result = element.html()?.trim() || '<p>Chapter content could not be found.</p>';
 
     this.chapterContentCache.set(chapterPath, result);
