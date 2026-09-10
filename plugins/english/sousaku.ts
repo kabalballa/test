@@ -21,7 +21,7 @@ class Sousaku implements Plugin.PluginBase {
   name = 'Sousaku – 創作 – We Create!';
   icon = 'src/en/sousaku/icon.svg';
   site = SITE;
-  version = '1.1.8';
+  version = '1.1.9';
 
   private novelCache = new Map<string, CachedNovel>();
   private chapterContentCache = new Map<string, string>();
@@ -81,25 +81,22 @@ class Sousaku implements Plugin.PluginBase {
         throw new Error(`Unsupported Sousaku chapter protocol: ${target.protocol}`);
       }
       target.searchParams.delete(CHAPTER_MARKER);
-      target.hash = '';
       const response = await fetchApi(target.href);
       if (!response.ok) throw new Error(`Sousaku returned ${response.status}`);
       return response.text();
     }
 
     requestUrl.searchParams.delete(CHAPTER_MARKER);
-    requestUrl.hash = '';
     const response = await fetchApi(requestUrl.href);
     if (!response.ok) throw new Error(`Sousaku returned ${response.status}`);
     return response.text();
   }
 
   private toChapterPath(url: URL, chapterName: string): string {
-    const cleanUrl = new URL(url.href);
-    cleanUrl.searchParams.delete(CHAPTER_MARKER);
-    cleanUrl.hash = '';
+    const target = new URL(url.href);
+    target.searchParams.delete(CHAPTER_MARKER);
     return new URL(
-      `${CHAPTER_WRAPPER}?url=${encodeURIComponent(cleanUrl.href)}&${CHAPTER_MARKER}=${encodeURIComponent(chapterName)}`,
+      `${CHAPTER_WRAPPER}?url=${encodeURIComponent(target.href)}&${CHAPTER_MARKER}=${encodeURIComponent(chapterName)}`,
       this.site,
     ).href;
   }
@@ -164,37 +161,40 @@ class Sousaku implements Plugin.PluginBase {
   }
 
   private extractChapters($: ReturnType<typeof load>, novelPath: string, _hasContentRoot: boolean): Plugin.ChapterItem[] {
-    const seenLabels = new Set<string>();
+    const seen = new Set<string>();
     const chapters: Plugin.ChapterItem[] = [];
     const novelUrl = new URL(novelPath, this.site);
     const contentRoot = $('.entry-content').first().length ? $('.entry-content').first() : $('article').first().length ? $('article').first() : $('main').first();
     const root = contentRoot.length ? contentRoot : $('body');
+    const excludedPattern = /^(?:illustrations?|manga)\s*:?\s*$/i;
     let inExcludedSection = false;
-    const headingPattern = /^(?:illustrations?|manga)\s*:?\s*$/i;
-    const headingsAndLinks = root.find('h1, h2, h3, h4, h5, h6, a[href]');
 
-    headingsAndLinks.each((_, node) => {
+    root.find('h1, h2, h3, h4, h5, h6, a[href]').each((_, node) => {
       const tag = String(node.name || '').toLowerCase();
       const element = $(node);
-      const headingText = element.text().replace(/\s+/g, ' ').trim();
+      const text = element.text().replace(/\s+/g, ' ').trim();
+
       if (/^h[1-6]$/.test(tag)) {
-        inExcludedSection = headingPattern.test(headingText);
+        inExcludedSection = excludedPattern.test(text);
         return;
       }
       if (tag !== 'a' || inExcludedSection) return;
 
       const href = element.attr('href');
-      const text = headingText;
       if (!href || !text) return;
+
       let url: URL;
       try { url = new URL(href, this.site); } catch { return; }
 
-      const cleanHrefUrl = new URL(url.href);
-      cleanHrefUrl.hash = '';
-      cleanHrefUrl.searchParams.delete(CHAPTER_MARKER);
-      if (cleanHrefUrl.href.replace(/\/$/, '') === novelUrl.href.replace(/\/$/, '')) return;
+      const cleanTarget = new URL(url.href);
+      cleanTarget.searchParams.delete(CHAPTER_MARKER);
+      const originalFragment = cleanTarget.hash;
+      const cleanBase = new URL(cleanTarget.href);
+      cleanBase.hash = '';
 
-      const path = cleanHrefUrl.pathname.replace(/^\/+|\/+$/g, '');
+      if (cleanBase.href.replace(/\/$/, '') === novelUrl.href.replace(/\/$/, '')) return;
+
+      const path = cleanBase.pathname.replace(/^\/+|\/+$/g, '');
       const lowerPath = path.toLowerCase();
       if (!path || /\.(jpg|jpeg|png|gif|webp|svg|pdf)$/i.test(path)) return;
       if (/(?:^|[\s_-])illustrations?(?:[\s_-]|$)/i.test(`${text} ${path}`) || /(?:^|[\s_-])manga(?:[\s_-]|$)/i.test(`${text} ${path}`)) return;
@@ -204,17 +204,30 @@ class Sousaku implements Plugin.PluginBase {
       if (!textLooksLikeChapter && !pathLooksLikeChapter) return;
       if (/^(category|tag|author|about|contact|discord|donate|patreon|wp-|feed|page)(\/|$)/i.test(path)) return;
 
-      const labelKey = this.normalizeChapterLabel(text);
-      if (!labelKey || seenLabels.has(labelKey)) return;
-      seenLabels.add(labelKey);
+      const identity = `${cleanBase.href.replace(/\/$/, '')}::${this.normalizeChapterLabel(text)}`;
+      if (seen.has(identity)) return;
+      seen.add(identity);
 
       const numberMatch = text.match(/(?:chapter|episode)\s*([0-9]+(?:\.[0-9]+)?)/i) || text.match(/^\s*(\d{1,4}(?:\.\d+)?)\s*[-:–—]/);
       chapters.push({
         name: text,
-        path: this.toChapterPath(cleanHrefUrl, text),
+        path: this.toChapterPath(cleanTarget, text),
         chapterNumber: numberMatch ? Number(numberMatch[1]) : undefined,
-        releaseTime: this.extractChapterReleaseTime($, cleanHrefUrl, element),
+        releaseTime: this.extractChapterReleaseTime($, cleanBase, element),
       });
+
+      // Preserve the original anchor by replacing the wrapper target's fragment after construction.
+      const chapter = chapters[chapters.length - 1];
+      if (chapter && originalFragment) {
+        const wrapper = new URL(chapter.path, this.site);
+        const encodedTarget = wrapper.searchParams.get('url');
+        if (encodedTarget) {
+          const target = new URL(encodedTarget);
+          target.hash = originalFragment;
+          wrapper.searchParams.set('url', target.href);
+          chapter.path = wrapper.href;
+        }
+      }
     });
 
     return chapters;
@@ -225,10 +238,18 @@ class Sousaku implements Plugin.PluginBase {
     return /^(?:chapter\s+|episode\s+|prologue\b|epilogue\b|interlude\b|idle\s*talk\b)/i.test(normalized);
   }
 
-  private findChapterMarker($: ReturnType<typeof load>, root: ReturnType<ReturnType<typeof load>>, requestedLabel: string): ReturnType<typeof load> {
+  private findChapterMarker($: ReturnType<typeof load>, root: ReturnType<ReturnType<typeof load>>, requestedLabel: string, fragment = ''): ReturnType<typeof load> {
+    if (fragment) {
+      const id = decodeURIComponent(fragment.replace(/^#/, ''));
+      const escaped = id.replace(/([\\.#:[\],>+~*])/g, '\\$1');
+      const target = root.find(`#${escaped}`).first();
+      if (target.length) return target;
+      const named = root.find(`[name="${id.replace(/"/g, '\\"')}"]`).first();
+      if (named.length) return named;
+    }
+
     const normalized = this.normalizeChapterLabel(requestedLabel);
-    const candidates = root.find('h1, h2, h3, h4, h5, h6, p, div, li, strong, b, span');
-    return candidates.filter((_, element) => {
+    return root.find('h1, h2, h3, h4, h5, h6, p, div, li, strong, b, span').filter((_, element) => {
       const text = $(element).text().replace(/[\u200b\u200c\u200d\ufeff]/g, '').replace(/\s+/g, ' ').trim();
       const value = this.normalizeChapterLabel(text);
       if (!text || !this.isChapterMarkerText(text)) return false;
@@ -237,14 +258,6 @@ class Sousaku implements Plugin.PluginBase {
         || value.startsWith(`${normalized} -`)
         || value.startsWith(`${normalized} –`)
         || value.startsWith(`${normalized} —`);
-    }).filter((_, element) => {
-      const tag = String(element.name || '').toLowerCase();
-      if (!/^(div|li|p|strong|b|span)$/.test(tag)) return true;
-      return !$(element).children('div, p, li, strong, b, span').toArray().some(child => {
-        const childText = $(child).text().replace(/[\u200b\u200c\u200d\ufeff]/g, '').replace(/\s+/g, ' ').trim();
-        const childValue = this.normalizeChapterLabel(childText);
-        return childValue === normalized;
-      });
     }).first();
   }
 
@@ -257,13 +270,13 @@ class Sousaku implements Plugin.PluginBase {
     return marker;
   }
 
-  private extractRequestedChapter($: ReturnType<typeof load>, root: ReturnType<ReturnType<typeof load>>, requestedLabel: string): string {
-    const marker = this.findChapterMarker($, root, requestedLabel);
+  private extractRequestedChapter($: ReturnType<typeof load>, root: ReturnType<ReturnType<typeof load>>, requestedLabel: string, fragment = ''): string {
+    const marker = this.findChapterMarker($, root, requestedLabel, fragment);
     if (!marker.length) return '';
 
     const block = this.getChapterBlock(marker);
-    const result: string[] = [];
     const blockTag = String(block[0]?.name || '').toLowerCase();
+    const result: string[] = [];
 
     if (/^h[1-6]$/.test(blockTag)) {
       const level = Number(blockTag.slice(1));
@@ -276,17 +289,19 @@ class Sousaku implements Plugin.PluginBase {
         result.push($.html(current) || '');
         current = current.next();
       }
-    } else {
-      let current = block.next();
-      while (current.length) {
-        const currentTag = String(current[0]?.name || '').toLowerCase();
-        const currentText = current.text().replace(/[\u200b\u200c\u200d\ufeff]/g, '').replace(/\s+/g, ' ').trim();
-        if (/^h[1-6]$/.test(currentTag) || (currentText && this.isChapterMarkerText(currentText))) break;
-        result.push($.html(current) || '');
-        current = current.next();
-      }
+      return result.filter(Boolean).join('').trim();
     }
 
+    const parent = block.parent();
+    if (!parent.length) return '';
+    let current = block.next();
+    while (current.length) {
+      const currentTag = String(current[0]?.name || '').toLowerCase();
+      const currentText = current.text().replace(/[\u200b\u200c\u200d\ufeff]/g, '').replace(/\s+/g, ' ').trim();
+      if (/^h[1-6]$/.test(currentTag) || (currentText && this.isChapterMarkerText(currentText))) break;
+      result.push($.html(current) || '');
+      current = current.next();
+    }
     return result.filter(Boolean).join('').trim();
   }
 
@@ -342,22 +357,25 @@ class Sousaku implements Plugin.PluginBase {
 
     const requestUrl = new URL(chapterPath, this.site);
     const requestedLabel = requestUrl.searchParams.get(CHAPTER_MARKER) || '';
-    let cleanUrl: string;
+    let cleanUrl = '';
+    let fragment = '';
 
     if (requestUrl.pathname === CHAPTER_WRAPPER && requestUrl.searchParams.has('url')) {
       const encodedTarget = requestUrl.searchParams.get('url');
       if (!encodedTarget) return '<p>Chapter content could not be found.</p>';
       try {
         const target = new URL(encodedTarget);
-        target.searchParams.delete(CHAPTER_MARKER);
+        fragment = target.hash;
         target.hash = '';
+        target.searchParams.delete(CHAPTER_MARKER);
         cleanUrl = target.href;
       } catch {
         return '<p>Chapter content could not be found.</p>';
       }
     } else {
-      requestUrl.searchParams.delete(CHAPTER_MARKER);
+      fragment = requestUrl.hash;
       requestUrl.hash = '';
+      requestUrl.searchParams.delete(CHAPTER_MARKER);
       cleanUrl = requestUrl.href;
     }
 
@@ -367,14 +385,16 @@ class Sousaku implements Plugin.PluginBase {
     element.find('script, style, nav, header, footer, form, .sharedaddy, .jp-relatedposts, .comments-area').remove();
 
     let result = '';
-    if (requestedLabel) {
-      result = this.extractRequestedChapter($, element, requestedLabel);
-      if (!result) return '<p>Requested chapter section could not be isolated from the Sousaku post.</p>';
-    } else {
-      result = element.html()?.trim() || '';
+    if (fragment || requestedLabel) {
+      result = this.extractRequestedChapter($, element, requestedLabel, fragment);
     }
 
-    if (!result) result = '<p>Chapter content could not be found.</p>';
+    // Never silently return the complete shared post when a chapter-specific target was supplied.
+    if ((fragment || requestedLabel) && !result) {
+      result = '<p>Requested chapter could not be isolated.</p>';
+    }
+    if (!result) result = element.html()?.trim() || '<p>Chapter content could not be found.</p>';
+
     this.chapterContentCache.set(chapterPath, result);
     return result;
   }
