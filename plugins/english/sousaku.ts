@@ -17,26 +17,26 @@ class Sousaku implements Plugin.PluginBase {
   name = 'Sousaku – 創作 – We Create!';
   icon = 'src/en/sousaku/icon.svg';
   site = SITE;
-  version = '1.0.16';
+  version = '1.0.17';
 
   private novelCache = new Map<string, CachedNovel>();
   private chapterContentCache = new Map<string, string>();
   private catalogCache: Plugin.NovelItem[] | null = null;
 
   private readonly knownNovels = [
-    ['Moto Sekai Ichi Table of Contents', 'motto-sekai-ichi-i-no-sub-chara-ikusei-nikki'],
-    ['Labyrinth Renovation – Table of contents', 'labyrinth-renovation-table-of-contents'],
-    ['Only I know that the world will end – Table of Contents', 'only-i-know-that-the-world-will-end'],
+    ['Moto Sekai Ichi', 'motto-sekai-ichi-i-no-sub-chara-ikusei-nikki'],
+    ['Labyrinth Renovation', 'labyrinth-renovation-table-of-contents'],
+    ['Only I know that the world will end', 'only-i-know-that-the-world-will-end'],
     ['High Spec Village', 'high-spec-village'],
-    ['Teihen Ryoushu ToC', 'teihen-ryoushi-toc'],
-    ['Tensei arasaa joshi – Table of contents', 'tensei-arasaa-joshi-table-of-contents'],
+    ['Teihen Ryoushu', 'teihen-ryoushi-toc'],
+    ['Tensei arasaa joshi', 'tensei-arasaa-joshi-table-of-contents'],
     ['The villainous noble daughter is perfectly fine alone!', 'the-villainous-noble-daughter-is-perfectly-fine-alone'],
-    ['The Lady of the Underworld – ToC', 'the-lady-of-the-underworld'],
-    ['Beyond the hero’s death – Table of contents', 'beyond-the-heros-death-table-of-contents'],
-    ['The abused merchant’s daughter – Table of contents', 'the-abused-merchants-daughter-table-of-contents'],
+    ['The Lady of the Underworld', 'the-lady-of-the-underworld'],
+    ['Beyond the hero’s death', 'beyond-the-heros-death-table-of-contents'],
+    ['The abused merchant’s daughter', 'the-abused-merchants-daughter-table-of-contents'],
     ['My Wish was…', 'my-wish-was'],
-    ['Maseki Gurume – ToC', 'maseki-gurume-toc'],
-    ['Maseki Gurume LN – ToC', 'maseki-gurume-ln-toc'],
+    ['Maseki Gurume', 'maseki-gurume-toc'],
+    ['Maseki Gurume LN', 'maseki-gurume-ln-toc'],
     ['Mistaken for the Demon King', 'mistaken-for-the-demon-king'],
     ['Tou no Madoushi', 'tou-no-madoushi'],
     ['In search of a scenery I’ve yet to see.', 'in-search-of-a-scenery-i-have-yet-to-see'],
@@ -102,11 +102,33 @@ class Sousaku implements Plugin.PluginBase {
     return text
       .replace(/\s+/g, ' ')
       .replace(/\s*[–—-]\s*(?:table\s+of\s+contents|toc)\s*$/i, '')
+      .replace(/^\s*(?:table\s+of\s+contents|toc)\s*[–—:-]\s*/i, '')
       .replace(/\s*[:：]\s*$/, '')
       .trim();
   }
 
   private extractEntryTitle($: ReturnType<typeof load>): string {
+    const firstTitle = $('article .entry-title, article h1, main .entry-title, main h1, .entry-content h1')
+      .map((_, el) => $(el).text().replace(/\s+/g, ' ').trim())
+      .get()
+      .find(Boolean);
+
+    if (firstTitle) {
+      const normalized = this.normalizeNovelTitle(firstTitle);
+      if (normalized && !/^(sousaku|kari translates japanese novels)$/i.test(normalized)) {
+        return normalized;
+      }
+    }
+
+    const fallbackTitles = $('article .entry-title, article h1, main .entry-title, main h1, .entry-content h1')
+      .map((_, el) => $(el).text().replace(/\s+/g, ' ').trim())
+      .get()
+      .filter(Boolean)
+      .map(title => this.normalizeNovelTitle(title))
+      .filter(title => title && !/sousaku|kari translates japanese novels/i.test(title));
+
+    if (fallbackTitles.length) return fallbackTitles[0];
+
     const explicitEnglishTitle = $('article, main, .entry-content')
       .first()
       .find('*')
@@ -117,17 +139,6 @@ class Sousaku implements Plugin.PluginBase {
     if (explicitEnglishTitle) {
       const title = explicitEnglishTitle.replace(/^english\s+title\s*:\s*/i, '').trim();
       if (title) return this.normalizeNovelTitle(title);
-    }
-
-    const candidates = $('article .entry-title, article h1, main .entry-title, main h1, .entry-content h1')
-      .map((_, el) => $(el).text().replace(/\s+/g, ' ').trim())
-      .get()
-      .filter(Boolean);
-
-    for (const candidate of candidates) {
-      if (/sousaku|kari translates japanese novels/i.test(candidate)) continue;
-      const title = this.normalizeNovelTitle(candidate);
-      if (title) return title;
     }
 
     return '';
