@@ -17,7 +17,7 @@ class Sousaku implements Plugin.PluginBase {
   name = 'Sousaku – 創作 – We Create!';
   icon = 'src/en/sousaku/icon.svg';
   site = SITE;
-  version = '1.0.10';
+  version = '1.0.11';
 
   private novelCache = new Map<string, CachedNovel>();
   private chapterContentCache = new Map<string, string>();
@@ -93,7 +93,8 @@ class Sousaku implements Plugin.PluginBase {
     const content = $('.entry-content').first();
     const contentRoot = content.length ? content : $('article').first().length ? $('article').first() : $('main').first();
 
-    const name = $('h1').first().text().replace(/\s+/g, ' ').trim() || $('title').first().text().trim() || novelPath;
+    const entryTitle = contentRoot.find('h1.entry-title, h1, .entry-title').first().text().replace(/\s+/g, ' ').trim();
+    const name = entryTitle || $('article .entry-title, article h1, main .entry-title, main h1').first().text().replace(/\s+/g, ' ').trim() || novelPath;
     const coverSrc = $('meta[property="og:image"]').attr('content') || contentRoot.find('img').first().attr('src');
     let cover = defaultCover;
     if (coverSrc) {
@@ -113,8 +114,6 @@ class Sousaku implements Plugin.PluginBase {
     const novelPathname = novelUrl.pathname.replace(/^\/+|\/+$/g, '').toLowerCase();
     const siteOrigin = new URL(this.site).origin;
 
-    // Start with article content and, when the theme differs, fall back to all
-    // document anchors. This avoids depending on one WordPress.com container.
     let links = $('.entry-content a[href], article a[href], main a[href]');
     if (!links.length || !hasContentRoot) links = $('a[href]');
 
@@ -138,9 +137,6 @@ class Sousaku implements Plugin.PluginBase {
       const pathLooksLikeChapter = /(?:chapter|episode|prologue|epilogue|interlude|idle-talk)/i.test(lowerPath)
         || /(?:^|-)\d{1,4}(?:-|\/|$)/.test(lowerPath);
 
-      // TOC links on Sousaku are normal same-site anchors. Chapter titles
-      // contain Episode/Chapter in the current site layout, while older posts
-      // often expose only a numbered slug. Accept either form.
       if (!textLooksLikeChapter && !pathLooksLikeChapter) return;
 
       const numberMatch = text.match(/(?:chapter|episode)\s*([0-9]+(?:\.[0-9]+)?)/i)
@@ -153,8 +149,6 @@ class Sousaku implements Plugin.PluginBase {
       });
     });
 
-    // As a final fallback, if the page had a content area but the site parser
-    // omitted anchors from it, retry against every document link.
     if (!chapters.length && links.length) {
       $('a[href]').each((_, element) => {
         const href = $(element).attr('href');
