@@ -9,6 +9,7 @@ type CachedNovel = {
   name: string;
   cover: string;
   summary: string;
+  status?: Plugin.NovelStatus;
   chapters: Plugin.ChapterItem[];
 };
 
@@ -17,7 +18,7 @@ class Sousaku implements Plugin.PluginBase {
   name = 'Sousaku – 創作 – We Create!';
   icon = 'src/en/sousaku/icon.svg';
   site = SITE;
-  version = '1.0.18';
+  version = '1.1.0';
 
   private novelCache = new Map<string, CachedNovel>();
   private chapterContentCache = new Map<string, string>();
@@ -146,6 +147,53 @@ class Sousaku implements Plugin.PluginBase {
     }
   }
 
+  private extractNovelStatus($: ReturnType<typeof load>, slug: string): Plugin.NovelStatus {
+    const text = $('article, main, .entry-content').first().text().replace(/\s+/g, ' ').trim();
+
+    if (/\b(?:series|novel)\s*(?:status|state)\s*[:\-]\s*completed\b/i.test(text)
+      || /\bcompleted\b/i.test(text)) {
+      return Plugin.NovelStatus.Completed;
+    }
+    if (/\b(?:series|novel)\s*(?:status|state)\s*[:\-]\s*(?:on\s+)?hiatus\b/i.test(text)
+      || /\bon\s+hiatus\b/i.test(text)) {
+      return Plugin.NovelStatus.OnHiatus;
+    }
+    if (/\b(?:series|novel)\s*(?:status|state)\s*[:\-]\s*(?:cancelled|canceled)\b/i.test(text)) {
+      return Plugin.NovelStatus.Cancelled;
+    }
+    if (/\b(?:series|novel)\s*(?:status|state)\s*[:\-]\s*(?:ongoing|active|in progress)\b/i.test(text)) {
+      return Plugin.NovelStatus.Ongoing;
+    }
+
+    // Sousaku currently identifies these as completed in its site-wide navigation/footer.
+    const completedSlugs = new Set([
+      'beyond-the-heros-death-table-of-contents',
+      'the-abused-merchants-daughter-table-of-contents',
+    ]);
+    if (completedSlugs.has(slug)) return Plugin.NovelStatus.Completed;
+
+    return Plugin.NovelStatus.Unknown;
+  }
+
+  private extractChapterReleaseTime($: ReturnType<typeof load>, url: URL, element: ReturnType<typeof load>[0]): string | undefined {
+    // Most Sousaku chapter permalinks contain the WordPress publication date:
+    // /YYYY/MM/DD/slug/. This gives us the date without fetching every chapter.
+    const dateMatch = url.pathname.match(/\/(\d{4})\/(\d{2})\/(\d{2})(?:\/|$)/);
+    if (dateMatch) return `${dateMatch[1]}-${dateMatch[2]}-${dateMatch[3]}`;
+
+    // Also accept common date metadata when the link itself contains it.
+    const rawDate = $(element).attr('datetime')
+      || $(element).attr('data-date')
+      || $(element).closest('[datetime], [data-date]').first().attr('datetime')
+      || $(element).closest('[datetime], [data-date]').first().attr('data-date');
+    if (rawDate) {
+      const parsed = new Date(rawDate);
+      if (!Number.isNaN(parsed.getTime())) return parsed.toISOString();
+    }
+
+    return undefined;
+  }
+
   async popularNovels(pageNo: number, _options?: unknown): Promise<Plugin.NovelItem[]> {
     if (pageNo < 1) return [];
     const items = await this.catalog();
@@ -174,6 +222,7 @@ class Sousaku implements Plugin.PluginBase {
       path: novelPath,
       cover: cached.cover,
       summary: cached.summary,
+      status: cached.status,
       chapters: cached.chapters.slice(),
     };
   }
@@ -184,11 +233,13 @@ class Sousaku implements Plugin.PluginBase {
     const contentRoot = content.length ? content : $('article').first().length ? $('article').first() : $('main').first();
     const name = this.extractEntryTitle($) || novelPath;
     const cover = this.extractCover($, contentRoot);
+    const slug = new URL(novelPath, this.site).pathname.replace(/^\/+|\/+$/g, '');
+    const status = this.extractNovelStatus($, slug);
 
     const paragraphs = contentRoot.find('p').map((_, el) => $(el).text().replace(/\s+/g, ' ').trim()).get().filter(Boolean);
     const summary = paragraphs.slice(0, 4).join('\n\n') || 'Chapters published by Sousaku.';
     const chapters = this.extractChapters($, novelPath, contentRoot.length > 0);
-    return { name, cover, summary, chapters };
+    return { name, cover, summary, status, chapters };
   }
 
   private extractChapters($: ReturnType<typeof load>, novelPath: string, hasContentRoot: boolean): Plugin.ChapterItem[] {
@@ -227,6 +278,7 @@ class Sousaku implements Plugin.PluginBase {
         name: text,
         path: this.toChapterPath(url),
         chapterNumber: numberMatch ? Number(numberMatch[1]) : undefined,
+        releaseTime: this.extractChapterReleaseTime($, url, element),
       });
     });
 
@@ -245,6 +297,7 @@ class Sousaku implements Plugin.PluginBase {
           name: text,
           path: this.toChapterPath(url),
           chapterNumber: numberMatch ? Number(numberMatch[1]) : undefined,
+          releaseTime: this.extractChapterReleaseTime($, url, element),
         });
       });
     }
