@@ -21,7 +21,7 @@ class Sousaku implements Plugin.PluginBase {
   name = 'Sousaku – 創作 – We Create!';
   icon = 'src/en/sousaku/icon.svg';
   site = SITE;
-  version = '1.1.7';
+  version = '1.1.8';
 
   private novelCache = new Map<string, CachedNovel>();
   private chapterContentCache = new Map<string, string>();
@@ -110,6 +110,7 @@ class Sousaku implements Plugin.PluginBase {
 
   private normalizeChapterLabel(text: string): string {
     return text
+      .replace(/[\u200b\u200c\u200d\ufeff]/g, '')
       .replace(/[’‘]/g, "'")
       .replace(/[“”]/g, '"')
       .replace(/\s+/g, ' ')
@@ -191,7 +192,6 @@ class Sousaku implements Plugin.PluginBase {
       const cleanHrefUrl = new URL(url.href);
       cleanHrefUrl.hash = '';
       cleanHrefUrl.searchParams.delete(CHAPTER_MARKER);
-      cleanHrefUrl.hash = '';
       if (cleanHrefUrl.href.replace(/\/$/, '') === novelUrl.href.replace(/\/$/, '')) return;
 
       const path = cleanHrefUrl.pathname.replace(/^\/+|\/+$/g, '');
@@ -221,39 +221,73 @@ class Sousaku implements Plugin.PluginBase {
   }
 
   private isChapterMarkerText(text: string): boolean {
-    return /^(?:chapter\s+|episode\s+|prologue\b|epilogue\b|interlude\b|idle\s*talk\b)/i.test(text.trim());
+    const normalized = text.replace(/[\u200b\u200c\u200d\ufeff]/g, '').replace(/\s+/g, ' ').trim();
+    return /^(?:chapter\s+|episode\s+|prologue\b|epilogue\b|interlude\b|idle\s*talk\b)/i.test(normalized);
   }
 
   private findChapterMarker($: ReturnType<typeof load>, root: ReturnType<ReturnType<typeof load>>, requestedLabel: string): ReturnType<typeof load> {
     const normalized = this.normalizeChapterLabel(requestedLabel);
-    return root.find('h1, h2, h3, h4, h5, h6, p, div, li').filter((_, element) => {
-      const text = $(element).text().replace(/\s+/g, ' ').trim();
+    const candidates = root.find('h1, h2, h3, h4, h5, h6, p, div, li, strong, b, span');
+    return candidates.filter((_, element) => {
+      const text = $(element).text().replace(/[\u200b\u200c\u200d\ufeff]/g, '').replace(/\s+/g, ' ').trim();
       const value = this.normalizeChapterLabel(text);
-      if (!value || !this.isChapterMarkerText(text)) return false;
-      if (value === normalized) return true;
-      return value.startsWith(`${normalized}:`) || value.startsWith(`${normalized} -`) || value.startsWith(`${normalized} –`) || value.startsWith(`${normalized} —`);
+      if (!text || !this.isChapterMarkerText(text)) return false;
+      return value === normalized
+        || value.startsWith(`${normalized}:`)
+        || value.startsWith(`${normalized} -`)
+        || value.startsWith(`${normalized} –`)
+        || value.startsWith(`${normalized} —`);
+    }).filter((_, element) => {
+      const tag = String(element.name || '').toLowerCase();
+      if (!/^(div|li|p|strong|b|span)$/.test(tag)) return true;
+      return !$(element).children('div, p, li, strong, b, span').toArray().some(child => {
+        const childText = $(child).text().replace(/[\u200b\u200c\u200d\ufeff]/g, '').replace(/\s+/g, ' ').trim();
+        const childValue = this.normalizeChapterLabel(childText);
+        return childValue === normalized;
+      });
     }).first();
+  }
+
+  private getChapterBlock(marker: ReturnType<ReturnType<typeof load>>): ReturnType<ReturnType<typeof load>> {
+    const tag = String(marker[0]?.name || '').toLowerCase();
+    if (/^(strong|b|span)$/.test(tag)) {
+      const parent = marker.parent();
+      if (parent.length) return parent;
+    }
+    return marker;
   }
 
   private extractRequestedChapter($: ReturnType<typeof load>, root: ReturnType<ReturnType<typeof load>>, requestedLabel: string): string {
     const marker = this.findChapterMarker($, root, requestedLabel);
     if (!marker.length) return '';
 
-    const markerText = marker.text().replace(/\s+/g, ' ').trim();
+    const block = this.getChapterBlock(marker);
     const result: string[] = [];
-    let current = marker.next();
+    const blockTag = String(block[0]?.name || '').toLowerCase();
 
-    while (current.length) {
-      const currentText = current.text().replace(/\s+/g, ' ').trim();
-      if (currentText && this.isChapterMarkerText(currentText)) break;
-      if (/^h[1-6]$/i.test(String(current[0]?.name || ''))) break;
-      result.push($.html(current) || '');
-      current = current.next();
+    if (/^h[1-6]$/.test(blockTag)) {
+      const level = Number(blockTag.slice(1));
+      let current = block.next();
+      while (current.length) {
+        const currentTag = String(current[0]?.name || '').toLowerCase();
+        const currentText = current.text().replace(/[\u200b\u200c\u200d\ufeff]/g, '').replace(/\s+/g, ' ').trim();
+        if (/^h[1-6]$/.test(currentTag) && Number(currentTag.slice(1)) <= level) break;
+        if (currentText && this.isChapterMarkerText(currentText)) break;
+        result.push($.html(current) || '');
+        current = current.next();
+      }
+    } else {
+      let current = block.next();
+      while (current.length) {
+        const currentTag = String(current[0]?.name || '').toLowerCase();
+        const currentText = current.text().replace(/[\u200b\u200c\u200d\ufeff]/g, '').replace(/\s+/g, ' ').trim();
+        if (/^h[1-6]$/.test(currentTag) || (currentText && this.isChapterMarkerText(currentText))) break;
+        result.push($.html(current) || '');
+        current = current.next();
+      }
     }
 
-    const output = result.filter(Boolean).join('').trim();
-    if (!output) return '';
-    return output;
+    return result.filter(Boolean).join('').trim();
   }
 
   async popularNovels(pageNo: number, _options?: unknown): Promise<Plugin.NovelItem[]> {
@@ -333,10 +367,14 @@ class Sousaku implements Plugin.PluginBase {
     element.find('script, style, nav, header, footer, form, .sharedaddy, .jp-relatedposts, .comments-area').remove();
 
     let result = '';
-    if (requestedLabel) result = this.extractRequestedChapter($, element, requestedLabel);
-    if (!result) result = element.html()?.trim() || '';
-    if (!result) result = '<p>Chapter content could not be found.</p>';
+    if (requestedLabel) {
+      result = this.extractRequestedChapter($, element, requestedLabel);
+      if (!result) return '<p>Requested chapter section could not be isolated from the Sousaku post.</p>';
+    } else {
+      result = element.html()?.trim() || '';
+    }
 
+    if (!result) result = '<p>Chapter content could not be found.</p>';
     this.chapterContentCache.set(chapterPath, result);
     return result;
   }
