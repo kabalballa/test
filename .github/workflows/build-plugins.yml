@@ -54,49 +54,12 @@ jobs:
           cp plugins/english/sousaku.ts upstream/plugins/english/sousaku.ts
           mkdir -p upstream/public/static/src/en/sousaku
           cp plugins/english/sousaku.svg upstream/public/static/src/en/sousaku/icon.svg
-          python - <<'PY'
-          from pathlib import Path
-          path = Path('upstream/plugins/english/sousaku.ts')
-          text = path.read_text(encoding='utf-8')
-          text = text.replace("  version = '1.2.4';", "  version = '1.2.5';", 1)
-          old = """      const identity = `${cleanBase.href.replace(/\\/$/, '')}::${this.normalizeChapterLabel(text)}::${fragment}`;
-      if (seen.has(identity)) return;
-      seen.add(identity);
-"""
-          new = """      const directBase = new URL(cleanBase.href);
-      const novelSlug = novelUrl.pathname.replace(/^\\/+|\\/+$/g, '');
-      if (novelSlug === 'motto-sekai-ichi-i-no-sub-chara-ikusei-nikki') {
-        const match = text.match(/(?:^|\\s)(\\d{1,4})([a-z]?)(?=\\s|$|[-:–—.])/i);
-        if (match) {
-          const number = match[1].padStart(3, '0');
-          const suffix = match[2].toLowerCase();
-          directBase.href = `${this.site}motto-sekai-ichi-i-no-sub-chara-ikusei-nikki/moto-sekai-ichi-${number}${suffix}/`;
-        }
-      }
 
-      const identity = `${directBase.href.replace(/\\/$/, '')}::${this.normalizeChapterLabel(text)}::${fragment}`;
-      if (seen.has(identity)) return;
-      seen.add(identity);
-"""
-          if old not in text:
-              raise SystemExit('Expected Sousaku identity block was not found')
-          text = text.replace(old, new, 1)
-          text = text.replace('path: this.toChapterPath(target, text),', 'path: this.toChapterPath(directBase, text),', 1)
-          text = text.replace('releaseTime: this.extractChapterReleaseTime(cleanBase, element),', 'releaseTime: this.extractChapterReleaseTime(directBase, element),', 1)
-          old2 = """    if ((fragment || requestedLabel) && !result) result = '<p>Requested chapter could not be isolated.</p>';
-    if (!result) result = element.html()?.trim() || '<p>Chapter content could not be found.</p>';
-"""
-          new2 = """    if ((fragment || requestedLabel) && !result) {
-      const isSharedDatePost = /^\\/\\d{4}\\/\\d{2}\\/\\d{2}\\//.test(new URL(cleanUrl, this.site).pathname);
-      if (isSharedDatePost) result = '<p>Requested chapter could not be isolated.</p>';
-    }
-    if (!result) result = element.html()?.trim() || '<p>Chapter content could not be found.</p>';
-"""
-          if old2 not in text:
-              raise SystemExit('Expected Sousaku parse fallback was not found')
-          text = text.replace(old2, new2, 1)
-          path.write_text(text, encoding='utf-8')
-          PY
+      - name: Patch Sousaku direct chapter URLs
+        working-directory: upstream
+        run: |
+          set -euo pipefail
+          python3 -c 'from pathlib import Path; p=Path("plugins/english/sousaku.ts"); s=p.read_text(encoding="utf-8"); s=s.replace("  version = '\''1.2.4'\'';", "  version = '\''1.2.5'\'';", 1); old="""  private toChapterPath(url: URL, chapterName: string): string {\n    const target = new URL(url.href);\n    target.searchParams.delete(CHAPTER_MARKER);\n    target.searchParams.set(CHAPTER_MARKER, chapterName);\n    return target.href;\n  }"""; new="""  private toChapterPath(url: URL, chapterName: string): string {\n    const target = new URL(url.href);\n    const sourcePath = target.pathname.toLowerCase();\n    if (sourcePath.includes(\"/moto-sekai-ichi-chapter-\")) {\n      const match = chapterName.match(/(?:^|\\s)(\\d{1,4})([a-z]?)(?=\\s|$|[-:–—.])/i);\n      if (match) {\n        const number = match[1].padStart(3, \"0\");\n        const suffix = match[2].toLowerCase();\n        const direct = new URL(`${this.site}motto-sekai-ichi-i-no-sub-chara-ikusei-nikki/moto-sekai-ichi-${number}${suffix}/`);\n        direct.hash = target.hash;\n        return direct.href;\n      }\n    }\n    target.searchParams.delete(CHAPTER_MARKER);\n    target.searchParams.set(CHAPTER_MARKER, chapterName);\n    return target.href;\n  }"""; s=s.replace(old,new,1); old2="""    let result = '';\n    if (fragment || requestedLabel) result = this.extractRequestedChapter($, element, requestedLabel, fragment, cleanUrl);\n    if ((fragment || requestedLabel) && !result) result = '<p>Requested chapter could not be isolated.</p>';\n"""; new2="""    let result = '';\n    const isSharedDatePost = /^\\/\\d{4}\\/\\d{2}\\/\\d{2}\\//.test(new URL(cleanUrl, this.site).pathname);\n    if (fragment || (requestedLabel && isSharedDatePost)) result = this.extractRequestedChapter($, element, requestedLabel, fragment, cleanUrl);\n    if ((fragment || (requestedLabel && isSharedDatePost)) && !result) result = '<p>Requested chapter could not be isolated.</p>';\n"""; s=s.replace(old2,new2,1); p.write_text(s,encoding="utf-8")' 
 
       - name: Build plugin manifest
         working-directory: upstream
