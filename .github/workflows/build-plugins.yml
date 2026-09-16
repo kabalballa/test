@@ -55,24 +55,6 @@ jobs:
           mkdir -p upstream/public/static/src/en/sousaku
           cp plugins/english/sousaku.svg upstream/public/static/src/en/sousaku/icon.svg
 
-      - name: Use direct Sousaku chapter URLs
-        working-directory: upstream
-        run: |
-          set -euo pipefail
-          python - <<'PY'
-          from pathlib import Path
-
-          path = Path('plugins/english/sousaku.ts')
-          text = path.read_text(encoding='utf-8')
-          text = text.replace("  version = '1.2.2';", "  version = '1.2.3';")
-          old = """  private toChapterPath(url: URL, chapterName: string): string {\n    const target = new URL(url.href);\n    target.searchParams.delete(CHAPTER_MARKER);\n    return new URL(\n      `${CHAPTER_WRAPPER}?url=${encodeURIComponent(target.href)}&${CHAPTER_MARKER}=${encodeURIComponent(chapterName)}`,\n      this.site,\n    ).href;\n  }"""
-          new = """  private toChapterPath(url: URL, chapterName: string): string {\n    const target = new URL(url.href);\n    target.searchParams.delete(CHAPTER_MARKER);\n    target.searchParams.set(CHAPTER_MARKER, chapterName);\n    return target.href;\n  }"""
-          if old not in text:
-              raise SystemExit('Expected Sousaku toChapterPath block was not found')
-          text = text.replace(old, new, 1)
-          path.write_text(text, encoding='utf-8')
-          PY
-
       - name: Build plugin manifest
         working-directory: upstream
         run: |
@@ -119,7 +101,7 @@ jobs:
           test -s public/static/src/en/sousaku/icon.svg
           grep -Eq '"id"[[:space:]]*:[[:space:]]*"sousaku"' .dist/plugins.json
           grep -q 'public/static/src/en/sousaku/icon.svg' .dist/plugins.json
-          grep -q 'version = '\''1.2.3'\''\|version: '\''1.2.3'\''' plugins/english/sousaku.ts .js/plugins/english/sousaku.js || true
+          grep -q 'version = '\''1.2.4'\''\|version: '\''1.2.4'\''' plugins/english/sousaku.ts .js/plugins/english/sousaku.js || true
 
       - name: Publish generated files
         env:
