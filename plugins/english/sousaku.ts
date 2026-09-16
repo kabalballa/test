@@ -21,7 +21,7 @@ class Sousaku implements Plugin.PluginBase {
   name = 'Sousaku – 創作 – We Create!';
   icon = 'src/en/sousaku/icon.svg';
   site = SITE;
-  version = '1.2.2';
+  version = '1.2.4';
 
   private novelCache = new Map<string, CachedNovel>();
   private chapterContentCache = new Map<string, string>();
@@ -144,10 +144,8 @@ class Sousaku implements Plugin.PluginBase {
   private toChapterPath(url: URL, chapterName: string): string {
     const target = new URL(url.href);
     target.searchParams.delete(CHAPTER_MARKER);
-    return new URL(
-      `${CHAPTER_WRAPPER}?url=${encodeURIComponent(target.href)}&${CHAPTER_MARKER}=${encodeURIComponent(chapterName)}`,
-      this.site,
-    ).href;
+    target.searchParams.set(CHAPTER_MARKER, chapterName);
+    return target.href;
   }
 
   private extractEntryTitle($: ReturnType<typeof load>): string {
@@ -261,14 +259,9 @@ class Sousaku implements Plugin.PluginBase {
       };
 
       if (fragment) {
-        const wrapper = new URL(chapter.path, this.site);
-        const encodedTarget = wrapper.searchParams.get('url');
-        if (encodedTarget) {
-          const preservedTarget = new URL(encodedTarget);
-          preservedTarget.hash = fragment;
-          wrapper.searchParams.set('url', preservedTarget.href);
-          chapter.path = wrapper.href;
-        }
+        const direct = new URL(chapter.path, this.site);
+        direct.hash = fragment;
+        chapter.path = direct.href;
       }
       chapters.push(chapter);
     });
@@ -337,7 +330,7 @@ class Sousaku implements Plugin.PluginBase {
     return current?.parent === ancestor ? current : null;
   }
 
-  private extractBetweenBlocks($: ReturnType<typeof load>, startBlock: ReturnType<ReturnType<typeof load>>, endBlock?: ReturnType<ReturnType<typeof load>>): string {
+  private extractBetweenBlocks($: ReturnType<typeof load>, startBlock: ReturnType<typeof load>, endBlock?: ReturnType<typeof load>): string {
     const start = startBlock[0];
     const end = endBlock?.[0];
     if (!start) return '';
@@ -523,27 +516,10 @@ class Sousaku implements Plugin.PluginBase {
 
     const requestUrl = new URL(chapterPath, this.site);
     const requestedLabel = requestUrl.searchParams.get(CHAPTER_MARKER) || '';
-    let cleanUrl = '';
-    let fragment = '';
-
-    if (requestUrl.pathname === CHAPTER_WRAPPER && requestUrl.searchParams.has('url')) {
-      const encodedTarget = requestUrl.searchParams.get('url');
-      if (!encodedTarget) return '<p>Chapter content could not be found.</p>';
-      try {
-        const target = new URL(encodedTarget);
-        fragment = target.hash;
-        target.hash = '';
-        target.searchParams.delete(CHAPTER_MARKER);
-        cleanUrl = target.href;
-      } catch {
-        return '<p>Chapter content could not be found.</p>';
-      }
-    } else {
-      fragment = requestUrl.hash;
-      requestUrl.hash = '';
-      requestUrl.searchParams.delete(CHAPTER_MARKER);
-      cleanUrl = requestUrl.href;
-    }
+    const fragment = requestUrl.hash;
+    requestUrl.hash = '';
+    requestUrl.searchParams.delete(CHAPTER_MARKER);
+    const cleanUrl = requestUrl.href;
 
     const $ = load(await this.fetchChapterPage(cleanUrl));
     const element = $('.entry-content').first();
