@@ -21,7 +21,7 @@ class Sousaku implements Plugin.PluginBase {
   name = 'Sousaku – 創作 – We Create!';
   icon = 'src/en/sousaku/icon.svg';
   site = SITE;
-  version = '1.2.1';
+  version = '1.2.2';
 
   private novelCache = new Map<string, CachedNovel>();
   private chapterContentCache = new Map<string, string>();
@@ -86,6 +86,33 @@ class Sousaku implements Plugin.PluginBase {
       || value.startsWith(`${requested} —`)
       || value.startsWith(`${requested}.`)
       || value.startsWith(`${requested} `);
+  }
+
+  private chapterToken(text: string): string {
+    return this.normalizeChapterLabel(text).replace(/[^a-z0-9]+/g, '');
+  }
+
+  private samePage(href: string, pageUrl: string): boolean {
+    try {
+      const a = new URL(href, this.site);
+      const b = new URL(pageUrl, this.site);
+      a.hash = '';
+      b.hash = '';
+      return a.href.replace(/\/$/, '') === b.href.replace(/\/$/, '');
+    } catch {
+      return false;
+    }
+  }
+
+  private chapterLinkLooksRelevant(text: string, href: string, requestedLabel = ''): boolean {
+    const clean = this.cleanText(text);
+    if (!clean) return false;
+    if (requestedLabel && this.chapterLabelMatches(clean, requestedLabel)) return true;
+    if (this.isChapterMarkerText(clean)) return true;
+    const token = this.chapterToken(clean);
+    const hrefToken = this.chapterToken(href);
+    if (!token || !hrefToken) return false;
+    return hrefToken.includes(token);
   }
 
   private async getHtml(path = ''): Promise<string> {
@@ -288,13 +315,105 @@ class Sousaku implements Plugin.PluginBase {
   private getChapterBlock(marker: ReturnType<ReturnType<typeof load>>): ReturnType<ReturnType<typeof load>> {
     const tag = String(marker[0]?.name || '').toLowerCase();
     if (/^(strong|b|span)$/.test(tag)) {
-      const parent = marker.closest('p, div, li').first();
+      const parent = marker.closest('p, h1, h2, h3, h4, h5, h6, li, blockquote, pre, figure, div').first();
       if (parent.length) return parent;
     }
     return marker;
   }
 
-  private extractRequestedChapter($: ReturnType<typeof load>, root: ReturnType<ReturnType<typeof load>>, requestedLabel: string, fragment = ''): string {
+  private getParentChain(node: any): any[] {
+    const chain: any[] = [];
+    let current = node;
+    while (current) {
+      chain.push(current);
+      current = current.parent;
+    }
+    return chain;
+  }
+
+  private childUnderAncestor(ancestor: any, node: any): any {
+    let current = node;
+    while (current && current.parent && current.parent !== ancestor) current = current.parent;
+    return current?.parent === ancestor ? current : null;
+  }
+
+  private extractBetweenBlocks($: ReturnType<typeof load>, startBlock: ReturnType<ReturnType<typeof load>>, endBlock?: ReturnType<ReturnType<typeof load>>): string {
+    const start = startBlock[0];
+    const end = endBlock?.[0];
+    if (!start) return '';
+
+    if (end && start.parent === end.parent) {
+      const result: string[] = [];
+      let current = start.nextSibling;
+      while (current && current !== end) {
+        const html = $.html(current);
+        if (html) result.push(html);
+        current = current.nextSibling;
+      }
+      return result.join('').trim();
+    }
+
+    const startChain = this.getParentChain(start);
+    const endChain = end ? this.getParentChain(end) : [];
+    const endSet = new Set(endChain);
+    const commonAncestor = startChain.find(node => endSet.has(node));
+    if (!commonAncestor) return '';
+
+    const startChild = this.childUnderAncestor(commonAncestor, start);
+    const endChild = end ? this.childUnderAncestor(commonAncestor, end) : null;
+    if (!startChild) return '';
+
+    const result: string[] = [];
+    let current = startChild.nextSibling;
+    while (current && (!endChild || current !== endChild)) {
+      const html = $.html(current);
+      if (html) result.push(html);
+      current = current.nextSibling;
+    }
+
+    return result.join('').trim();
+  }
+
+  private extractChapterFromLinkBoundary($: ReturnType<typeof load>, root: ReturnType<ReturnType<typeof load>>, requestedLabel: string, cleanUrl: string): string {
+    const requested = this.normalizeChapterLabel(requestedLabel);
+    if (!requested) return '';
+
+    const links = root.find('a[href]').filter((_, node) => {
+      const href = $(node).attr('href');
+      if (!href || !this.samePage(href, cleanUrl)) return false;
+      const text = this.cleanText($(node).text());
+      return this.chapterLinkLooksRelevant(text, href);
+    }).toArray();
+
+    if (!links.length) return '';
+
+    const exactLinks = links.filter(node => this.chapterLabelMatches(this.cleanText($(node).text()), requestedLabel));
+    let startNode = exactLinks[0];
+
+    if (!startNode) {
+      const requestedToken = this.chapterToken(requestedLabel);
+      startNode = links.find(node => {
+        const href = $(node).attr('href') || '';
+        const textToken = this.chapterToken($(node).text());
+        const hrefToken = this.chapterToken(href);
+        return textToken === requestedToken || hrefToken.includes(requestedToken);
+      });
+    }
+
+    if (!startNode) return '';
+
+    const startBlock = this.getChapterBlock($(startNode));
+    const startIndex = links.indexOf(startNode);
+    const endNode = startIndex >= 0 ? links.slice(startIndex + 1).find(node => node !== startNode) : undefined;
+    const endBlock = endNode ? this.getChapterBlock($(endNode)) : undefined;
+
+    return this.extractBetweenBlocks($, startBlock, endBlock);
+  }
+
+  private extractRequestedChapter($: ReturnType<typeof load>, root: ReturnType<ReturnType<typeof load>>, requestedLabel: string, fragment = '', cleanUrl = ''): string {
+    const fromLinks = cleanUrl ? this.extractChapterFromLinkBoundary($, root, requestedLabel, cleanUrl) : '';
+    if (fromLinks) return fromLinks;
+
     const marker = this.findChapterMarker($, root, requestedLabel, fragment);
     if (!marker.length) return '';
 
@@ -432,7 +551,7 @@ class Sousaku implements Plugin.PluginBase {
     element.find('script, style, nav, header, footer, form, .sharedaddy, .jp-relatedposts, .comments-area').remove();
 
     let result = '';
-    if (fragment || requestedLabel) result = this.extractRequestedChapter($, element, requestedLabel, fragment);
+    if (fragment || requestedLabel) result = this.extractRequestedChapter($, element, requestedLabel, fragment, cleanUrl);
     if ((fragment || requestedLabel) && !result) result = '<p>Requested chapter could not be isolated.</p>';
     if (!result) result = element.html()?.trim() || '<p>Chapter content could not be found.</p>';
 
