@@ -192,7 +192,7 @@ class TseirpTranslations implements Plugin.PluginBase {
       const textLooksLikeChapter = /^(?:chapter\b|ch\.?\s*\d|prologue\b|epilogue\b|extra\b|side story\b)/i.test(text)
         || /^\(\s*\d{1,4}\s*\)/.test(text);
       const parentHasChapter = isPartLink;
-      const pathLooksLikeChapter = /(?:chapter|chap|ch[-_/]?\d|wm-v\d+c\d)/i.test(path);
+      const pathLooksLikeChapter = /(?:chapter|chap|ch[-_/]?\d|(?:^|[-_/])c\d{1,4}(?:[-_/]|\.|$)|wm-v\d+c\d)/i.test(path);
 
       if (!textLooksLikeChapter && !parentHasChapter && !pathLooksLikeChapter) return;
       if (seen.has(url.href)) return;
