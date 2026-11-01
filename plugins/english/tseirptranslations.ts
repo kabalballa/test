@@ -41,7 +41,7 @@ class TseirpTranslations implements Plugin.PluginBase {
     return response.text();
   }
 
-  private contentRoot($: ReturnType<typeof load>): ReturnType<typeof load> {
+  private contentRoot($: ReturnType<typeof load>): ReturnType<ReturnType<typeof load>> {
     const entry = $('.entry-content').first();
     if (entry.length) return entry;
     const article = $('article').first();
@@ -69,7 +69,7 @@ class TseirpTranslations implements Plugin.PluginBase {
     return this.normalizeTitle(openGraphTitle.replace(/\s*[|–—-]\s*Tseirp Translations\s*$/i, ''));
   }
 
-  private extractCover($: ReturnType<typeof load>, content: ReturnType<typeof load>): string {
+  private extractCover($: ReturnType<typeof load>, content: ReturnType<ReturnType<typeof load>>): string {
     const image = $('meta[property="og:image"]').attr('content')
       || $('meta[name="twitter:image"]').attr('content')
       || content.find('img').first().attr('src');
