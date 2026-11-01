@@ -21,7 +21,7 @@ class Sousaku implements Plugin.PluginBase {
   name = 'Sousaku – 創作 – We Create!';
   icon = 'src/en/sousaku/icon.svg';
   site = SITE;
-  version = '1.2.4';
+  version = '1.2.5';
 
   private novelCache = new Map<string, CachedNovel>();
   private chapterContentCache = new Map<string, string>();
@@ -143,6 +143,17 @@ class Sousaku implements Plugin.PluginBase {
 
   private toChapterPath(url: URL, chapterName: string): string {
     const target = new URL(url.href);
+    const sourcePath = target.pathname.toLowerCase();
+    if (sourcePath.includes("/moto-sekai-ichi-chapter-")) {
+      const match = chapterName.match(/(?:^|\s)(\d{1,4})([a-z]?)(?=\s|$|[-:–—.])/i);
+      if (match) {
+        const number = match[1].padStart(3, "0");
+        const suffix = match[2].toLowerCase();
+        const direct = new URL(this.site + "motto-sekai-ichi-i-no-sub-chara-ikusei-nikki/moto-sekai-ichi-" + number + suffix + "/");
+        direct.hash = target.hash;
+        return direct.href;
+      }
+    }
     target.searchParams.delete(CHAPTER_MARKER);
     target.searchParams.set(CHAPTER_MARKER, chapterName);
     return target.href;
@@ -527,8 +538,9 @@ class Sousaku implements Plugin.PluginBase {
     element.find('script, style, nav, header, footer, form, .sharedaddy, .jp-relatedposts, .comments-area').remove();
 
     let result = '';
-    if (fragment || requestedLabel) result = this.extractRequestedChapter($, element, requestedLabel, fragment, cleanUrl);
-    if ((fragment || requestedLabel) && !result) result = '<p>Requested chapter could not be isolated.</p>';
+    const isSharedDatePost = /^\/\d{4}\/\d{2}\/\d{2}\//.test(new URL(cleanUrl, this.site).pathname);
+    if (fragment || (requestedLabel && isSharedDatePost)) result = this.extractRequestedChapter($, element, requestedLabel, fragment, cleanUrl);
+    if ((fragment || (requestedLabel && isSharedDatePost)) && !result) result = '<p>Requested chapter could not be isolated.</p>';
     if (!result) result = element.html()?.trim() || '<p>Chapter content could not be found.</p>';
 
     this.chapterContentCache.set(chapterPath, result);
