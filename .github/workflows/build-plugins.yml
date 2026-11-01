@@ -67,58 +67,6 @@ jobs:
           mkdir -p upstream/public/static/src/en/tseirptranslations
           cp plugins/english/tseirptranslations.svg upstream/public/static/src/en/tseirptranslations/icon.svg
 
-      - name: Patch Sousaku direct chapter URLs
-        working-directory: upstream
-        run: |
-          set -euo pipefail
-          python3 - <<'PY'
-          from pathlib import Path
-
-          path = Path("plugins/english/sousaku.ts")
-          source = path.read_text(encoding="utf-8")
-          source = source.replace("  version = '1.2.4';", "  version = '1.2.5';", 1)
-
-          old_path = """  private toChapterPath(url: URL, chapterName: string): string {
-              const target = new URL(url.href);
-              target.searchParams.delete(CHAPTER_MARKER);
-              target.searchParams.set(CHAPTER_MARKER, chapterName);
-              return target.href;
-            }"""
-          new_path = """  private toChapterPath(url: URL, chapterName: string): string {
-              const target = new URL(url.href);
-              const sourcePath = target.pathname.toLowerCase();
-              if (sourcePath.includes("/moto-sekai-ichi-chapter-")) {
-                const match = chapterName.match(/(?:^|\\s)(\\d{1,4})([a-z]?)(?=\\s|$|[-:–—.])/i);
-                if (match) {
-                  const number = match[1].padStart(3, "0");
-                  const suffix = match[2].toLowerCase();
-                  const direct = new URL(this.site + "motto-sekai-ichi-i-no-sub-chara-ikusei-nikki/moto-sekai-ichi-" + number + suffix + "/");
-                  direct.hash = target.hash;
-                  return direct.href;
-                }
-              }
-              target.searchParams.delete(CHAPTER_MARKER);
-              target.searchParams.set(CHAPTER_MARKER, chapterName);
-              return target.href;
-            }"""
-          if old_path not in source:
-              raise SystemExit("Could not find the expected Sousaku toChapterPath method.")
-          source = source.replace(old_path, new_path, 1)
-
-          old_chapter = """    let result = '';
-            if (fragment || requestedLabel) result = this.extractRequestedChapter($, element, requestedLabel, fragment, cleanUrl);
-            if ((fragment || requestedLabel) && !result) result = '<p>Requested chapter could not be isolated.</p>';"""
-          new_chapter = """    let result = '';
-            const isSharedDatePost = /^\\/\\d{4}\\/\\d{2}\\/\\d{2}\\//.test(new URL(cleanUrl, this.site).pathname);
-            if (fragment || (requestedLabel && isSharedDatePost)) result = this.extractRequestedChapter($, element, requestedLabel, fragment, cleanUrl);
-            if ((fragment || (requestedLabel && isSharedDatePost)) && !result) result = '<p>Requested chapter could not be isolated.</p>';"""
-          if old_chapter not in source:
-              raise SystemExit("Could not find the expected Sousaku parseChapter block.")
-          source = source.replace(old_chapter, new_chapter, 1)
-
-          path.write_text(source, encoding="utf-8")
-          PY
-
       - name: Build plugin manifest
         working-directory: upstream
         run: |
