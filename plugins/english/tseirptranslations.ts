@@ -182,7 +182,7 @@ class TseirpTranslations implements Plugin.PluginBase {
 
       const path = url.pathname.toLowerCase();
       if (!path || /\.(jpg|jpeg|png|gif|webp|svg|pdf)$/i.test(path)) return;
-      if (/illustration|fan[- ]?art|manga|character|glossary|interview|review|donat|patreon|privacy|contact/i.test(text + ' ' + path)) return;
+      if (/illustrations?|fan[- ]?art|manga|character[- ]?(?:list|glossary)|glossary|interview|donat|patreon|privacy|contact/i.test(text + ' ' + path)) return;
 
       const parent = $(element).parent();
       const parentText = parent.clone().children('a').remove().end().text().replace(/\s+/g, ' ').trim();
@@ -192,7 +192,7 @@ class TseirpTranslations implements Plugin.PluginBase {
       const textLooksLikeChapter = /^(?:chapter\b|ch\.?\s*\d|prologue\b|epilogue\b|extra\b|side story\b)/i.test(text)
         || /^\(\s*\d{1,4}\s*\)/.test(text);
       const parentHasChapter = isPartLink;
-      const pathLooksLikeChapter = /(?:chapter|chap|ch[-_/]?\d|wm-v\d+c\d|\/(?:\d{4})\/\d{2}\/)/i.test(path);
+      const pathLooksLikeChapter = /(?:chapter|chap|ch[-_/]?\d|wm-v\d+c\d)/i.test(path);
 
       if (!textLooksLikeChapter && !parentHasChapter && !pathLooksLikeChapter) return;
       if (seen.has(url.href)) return;
