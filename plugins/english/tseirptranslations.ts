@@ -52,7 +52,7 @@ class TseirpTranslations implements Plugin.PluginBase {
   private normalizeTitle(text: string): string {
     return text
       .replace(/\s+/g, ' ')
-      .replace(/\s*[–—-]\s*(?:table\s+of\s+contents|toc)\s*$/i, '')
+      .replace(/\s*(?:[–—-]\s*)?(?:table\s+of\s+contents|toc)\s*$/i, '')
       .trim();
   }
 
